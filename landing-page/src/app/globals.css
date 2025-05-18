@@ -3,6 +3,8 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --primary-gradient: linear-gradient(to right, #52A57C, #94C56A);
+  --secondary-color: #313E53;
 }
 
 @theme inline {
@@ -16,6 +18,8 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --primary-gradient: linear-gradient(to right, #52A57C, #94C56A);
+    --secondary-color: #313E53;
   }
 }
 
