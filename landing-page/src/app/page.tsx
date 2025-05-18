@@ -1,17 +1,27 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import Image from 'next/image';
 
 export default function Home() {
   return (
     <div className="bg-gray-100 min-h-screen">
+      {/* Logo Header */}
+      <div className="flex items-center justify-between py-4 px-6 bg-white shadow-md">
+        <div className="flex items-center">
+          <Image src="/whatsapp-ai-filter-logo-nobg.png" alt="WhatsApp AI Filter Logo" width={50} height={50} />
+          <span className="ml-3 text-xl font-semibold text-gray-800">WhatsApp AI Filter</span>
+        </div>
+        <a href="https://github.com/avikalpg/whatsapp-ai-filter" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View on GitHub</a>
+      </div>
+
       {/* Hero Section */}
-      <header className="text-center py-20" style={{ background: 'var(--primary-gradient)', color: 'white' }}>
+      <main className="text-center py-28 min-h-96" style={{ background: 'var(--primary-gradient)', color: 'white' }}>
         <h1 className="text-4xl font-bold">Filter the Noise, Focus on What Matters in Your WhatsApp Groups</h1>
         <p className="mt-4 text-lg">An open-source tool leveraging AI to intelligently filter WhatsApp group messages, saving you time and keeping you informed.</p>
         <Button className="mt-6 px-6 py-3 rounded-lg">
           View on GitHub
         </Button>
-      </header>
+      </main>
 
       {/* Features Section */}
       <section className="py-16 px-8">
