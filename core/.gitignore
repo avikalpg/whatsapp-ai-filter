@@ -41,3 +41,7 @@ bower_components/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# WhatsApp Web JS
+.wwebjs_auth/
+.wwebjs_cache/
