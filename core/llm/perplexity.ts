@@ -1,12 +1,13 @@
 // backend/src/llm/perplexity.ts
 import axios from 'axios';
+import { RelevanceCheckResponseSchema, RelevanceCheckResponse } from './schemas.js';
 
 interface PerplexityResponse {
 	choices?: { message: { content: string } }[];
 	// Define other properties based on the actual API response
 }
 
-async function analyzeMessageWithPerplexity(message: string): Promise<PerplexityResponse | null> {
+async function analyzeMessageWithPerplexity(prompt: string): Promise<PerplexityResponse | null> {
 	const perplexityApiKey = process.env.PERPLEXITY_API_KEY;
 	const perplexityApiUrl = 'https://api.perplexity.ai/chat/completions'; // Check Perplexity API docs
 
@@ -21,12 +22,12 @@ async function analyzeMessageWithPerplexity(message: string): Promise<Perplexity
 			{
 				model: 'sonar',
 				messages: [
-					{ "role": "system", "content": "You are a helpful assistant with access to the world's information." },
 					{
 						role: 'user',
-						content: message
+						content: prompt
 					}
 				],
+				response_format: { type: 'json_object' } // Explicitly request JSON response
 			},
 			{
 				headers: {
@@ -40,6 +41,7 @@ async function analyzeMessageWithPerplexity(message: string): Promise<Perplexity
 		return response.data;
 	} catch (error: any) {
 		console.error('Error calling Perplexity API (Perplexity):', error.message);
+		console.error('Error details:', error.response?.data || error);
 		return null;
 	}
 }
