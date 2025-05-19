@@ -35,7 +35,7 @@ async function analyzeMessageWithOpenAi(message: string): Promise<OpenAiResponse
 			}
 		);
 
-		console.log('OpenAI API Response (OpenAI):', response.data);
+		console.debug('OpenAI API Response (OpenAI):', response.data);
 		return response.data;
 	} catch (error: any) {
 		console.error('Error calling OpenAI API:', error.message);

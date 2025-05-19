@@ -8,7 +8,7 @@ interface PerplexityResponse {
 
 async function analyzeMessageWithPerplexity(message: string): Promise<PerplexityResponse | null> {
 	const perplexityApiKey = process.env.PERPLEXITY_API_KEY;
-	const perplexityApiUrl = 'https://api.perplexity.io/chat/completions'; // Check Perplexity API docs
+	const perplexityApiUrl = 'https://api.perplexity.ai/chat/completions'; // Check Perplexity API docs
 
 	if (!perplexityApiKey) {
 		console.warn('Perplexity API key not found in .env file (required for Perplexity).');
@@ -19,13 +19,14 @@ async function analyzeMessageWithPerplexity(message: string): Promise<Perplexity
 		const response = await axios.post<PerplexityResponse>(
 			perplexityApiUrl,
 			{
-				model: 'sonar-small-online', // Or the model you prefer
+				model: 'sonar',
 				messages: [
+					{ "role": "system", "content": "You are a helpful assistant with access to the world's information." },
 					{
 						role: 'user',
 						content: message
 					}
-				]
+				],
 			},
 			{
 				headers: {
@@ -35,7 +36,7 @@ async function analyzeMessageWithPerplexity(message: string): Promise<Perplexity
 			}
 		);
 
-		console.log('Perplexity API Response (Perplexity):', response.data);
+		console.debug('Perplexity API Response (Perplexity):', response.data);
 		return response.data;
 	} catch (error: any) {
 		console.error('Error calling Perplexity API (Perplexity):', error.message);

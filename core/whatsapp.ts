@@ -8,7 +8,7 @@ const client = new Client({
 });
 
 client.on('qr', qr => {
-	console.log('Scan this QR code to log in:');
+	console.info('Scan this QR code to log in:');
 	qrcode.toString(qr, { type: 'terminal', small: true }, (err, url) => {
 		if (err) {
 			console.error('Error generating QR code:', err);
@@ -19,12 +19,12 @@ client.on('qr', qr => {
 });
 
 client.on('ready', () => {
-	console.log('WhatsApp Web client is ready!');
+	console.info('WhatsApp Web client is ready!');
 });
 
 client.initialize()
 	.then(() => {
-		console.log('WhatsApp Web client initialized successfully.');
+		console.info('WhatsApp Web client initialized successfully.');
 	})
 	.catch(err => {
 		console.error('Error initializing WhatsApp Web client:', err);
