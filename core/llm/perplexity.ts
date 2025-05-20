@@ -27,6 +27,30 @@ async function analyzeMessageWithPerplexity(message: string): Promise<Perplexity
 						content: message
 					}
 				],
+				response_format: {
+					"type": "json_schema",
+					"json_schema": {
+						"schema": {
+							'properties': {
+								'relevant': {
+									'title': 'Relevant',
+									'type': 'boolean'
+								},
+								'confidence': {
+									'title': 'Confidence',
+									'type': 'number'
+								},
+								'reasoning': {
+									'title': 'Reasoning',
+									'type': 'string'
+								}
+							},
+							'required': ['relevant', 'confidence', 'reasoning'],
+							'title': 'SomeFormat',
+							'type': 'object'
+						}
+					},
+				}
 			},
 			{
 				headers: {
