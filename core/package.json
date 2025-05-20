@@ -1,0 +1,43 @@
+{
+  "name": "whatsapp-ai-filter",
+  "version": "1.2.0",
+  "description": "WhatsApp-AI-Filter is an open-source project designed to help you manage information overload in WhatsApp groups. Running locally on your computer, this application monitors your specified WhatsApp groups and uses AI (leveraging the Perplexity Sonar API) to intelligently filter messages based on your interests. It notifies you about relevant discussions, such as meetups in specific locations or conversations about particular topics, allowing you to focus on what truly matters and ignore the noise.",
+  "keywords": [
+    "whatsapp",
+    "filter",
+    "prioritization",
+    "whatsapp-web",
+    "ai",
+    "llm"
+  ],
+  "homepage": "https://github.com/avikalpg/whatsapp-ai-filter#readme",
+  "bugs": {
+    "url": "https://github.com/avikalpg/whatsapp-ai-filter/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com/avikalpg/whatsapp-ai-filter.git"
+  },
+  "license": "GPL-3.0-or-later",
+  "author": "Avikalp Kumar Gupta",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --loader ts-node/esm --env-file=.env index.ts",
+    "dev": "nodemon --loader ts-node/esm --env-file=.env index.ts"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.28.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/node": "^22.15.18",
+    "@types/qrcode": "^1.5.5",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
