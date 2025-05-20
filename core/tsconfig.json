@@ -8,13 +8,20 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"moduleResolution": "NodeNext",
-		"sourceMap": true
+		"sourceMap": true,
+		"resolveJsonModule": true, // Allow importing JSON files
+		"baseUrl": "./src", // Base directory for resolving non-absolute module names
+		"paths": { // If you use path aliases
+			"@/*": [
+				"./src/*"
+			]
+		}
 	},
 	"include": [
-		"./src/**/*",
-		"./**/*.ts"
+		"./src/**/*.ts",
 	],
 	"exclude": [
-		"node_modules"
+		"node_modules",
+		"dist",
 	]
 }
