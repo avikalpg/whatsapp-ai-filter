@@ -17,16 +17,23 @@ WORKDIR /app
 #    - harfbuzz: Text shaping
 #    - openjdk17-jre: Sometimes needed for certain puppeteer versions/features (optional, but safe to include)
 RUN apk add --no-cache \
-	ca-certificates \
 	chromium \
-	udev \
 	nss \
 	freetype \
 	harfbuzz \
-	openjdk17-jre
+	ttf-freefont \
+	alsa-lib \
+	dbus \
+	libxml2 \
+	libxslt \
+	fontconfig \
+	udev \
+	openjdk17-jre \
+	ca-certificates
 
 # 2. Set environment variable to tell Puppeteer to skip downloading Chromium
 ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium-browser"
 
 # Copy package.json and package-lock.json to the working directory
 # This allows caching of dependencies.
