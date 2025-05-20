@@ -26,11 +26,11 @@ client.on('message', async msg => {
 			const chatName = chat.name || msg.from; // Fallback to chat ID if name is not available
 
 			const groupInfo = msg.from.endsWith('@g.us') ? ` in group "${chatName}"` : '';
-			const chatUrl = `https://web.whatsapp.com/send?chat=${msg.from}`;
+			const chatUrl = `https://wa.me/${msg.from.replace('@c.us', '').replace('@g.us', '')}`;
 
 			client.sendMessage(
 				myContact,
-				`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\nChat Link: ${chatUrl}`
+				`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nRelevance logic: ${analysisResult?.reasoning ?? "No reason provided"}\n\nChat Link: ${chatUrl}`
 			);
 		} catch (error) {
 			console.error('Error fetching contact or chat information:', error);
