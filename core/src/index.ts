@@ -2,41 +2,99 @@
 console.info('WhatsApp AI Filter backend is starting...');
 import client from './whatsapp.js';
 import { analyzeMessageWithLLM } from './llm/index.js';
+import { handleSelfChatCommand } from './commandHandler.js';
+import { saveUserConfig, userConfig } from './dataStore.js';
+import { Message, Contact, Chat } from 'whatsapp-web.js'; // Import Message, Contact, Chat for type hints
 
-client.on('message', async msg => {
+client.on('message_create', async (msg: Message) => {
+	const senderContact: Contact = await msg.getContact();
+	const chat: Chat = await msg.getChat();
+
+	// Determine sender and chat names for logging and notifications
+	const senderName = msg.fromMe ? 'You' : senderContact.pushname || senderContact.name || 'Unknown Contact';
+	const chatName = chat.name || msg.from; // Fallback to chat ID if name is not available
+
+	// IMPORTANT: Get the actual originating chat ID
+	// If msg.fromMe, msg.id.remote is the actual chat where it was sent (self-chat or group)
+	// If not msg.fromMe, msg.from is already the correct chat ID.
+	const actualChatId = msg.fromMe ? msg.id.remote : msg.from;
+
+	const isActuallyGroup = actualChatId.endsWith('@g.us');
+	const groupInfo = isActuallyGroup ? ` in group "${chatName}"` : '';
+	const chatUrl = `https://wa.me/${actualChatId.replace('@c.us', '').replace('@g.us', '')}`;
+
+
 	console.log('Received message:', {
 		from: msg.from,
-		sender: await msg.getContact(),
-		group: msg.from.endsWith('@g.us') ? ` in group "${(await msg.getChat()).name}"` : '',
+		actualChatId: actualChatId,
+		sender: senderContact,
+		isFromMe: msg.fromMe,
+		group: groupInfo,
 		body: msg.body,
+		hasMedia: msg.hasMedia,
 		timestamp: msg.timestamp,
 	});
+
+	// --- Determine effective chat IDs ---
+	const myClientId = client.info.wid._serialized;
+	const commandChatId = userConfig['commandChatId'] || myClientId;
+	const notificationChatId = userConfig['notificationChatId'] || myClientId;
+
+	// --- Handle incoming messages ---
+	if (msg.fromMe) {
+		// This message was sent by the bot's own number.
+		console.log(`[FROM ME] Message from self. Actual Chat ID: "${actualChatId}". Message: "${msg.body}"`);
+
+		// --- Handle !set_command_chat and !set_notification_chat commands ---
+		if (msg.body.trim() === '!set_command_chat') {
+			userConfig['commandChatId'] = actualChatId; // Store the actual originating chat ID
+			saveUserConfig();
+			await msg.reply(`This chat "${chatName}" has been set as the dedicated bot command channel!`);
+			console.log(`Bot command chat set to: ${actualChatId}`);
+			return;
+		} else if (msg.body.trim() === '!set_notification_chat') {
+			userConfig['notificationChatId'] = actualChatId; // Store the actual originating chat ID
+			saveUserConfig();
+			await msg.reply(`This chat "${chatName}" has been set as the dedicated bot notification channel!`);
+			console.log(`Bot notification chat set to: ${actualChatId}`);
+			return;
+		}
+
+		// --- Handle other commands sent by the user to themselves ---
+		if (msg.body.startsWith('!') && actualChatId === commandChatId) {
+			console.log(`[COMMAND] Processing self-sent command in designated chat (${commandChatId}). Message: "${msg.body}"`);
+			await handleSelfChatCommand(msg);
+		} else if (actualChatId !== commandChatId && msg.body.startsWith('!')) {
+			// If it's a self-sent command, but NOT in the designated command chat
+			console.log(`[INFO] Ignoring self-sent command not in designated command chat (${commandChatId}). Message: "${msg.body}"`);
+		} else {
+			// If it's a self-sent message in the command chat, but not a command
+			console.log(`[INFO] Ignoring non-command self-sent message in designated command chat (${commandChatId}). Message: "${msg.body}"`);
+		}
+		return; // Always return after processing a message from self
+	}
+
+	// Skip processing if the message is from an enterprise user or is a status update
+	if (msg.isStatus || senderContact.isEnterprise || msg.from === commandChatId || msg.from === notificationChatId) {
+		console.log('Skipping message from enterprise user, self-chat or status update.');
+		return;
+	}
 
 	const analysisResult = await analyzeMessageWithLLM(msg.body);
 	console.debug('LLM Analysis Result:', analysisResult);
 
 	if (analysisResult?.relevant) {
-		const myContact = '917021803109@c.us';
-
 		try {
-			const senderContact = await msg.getContact();
-			const senderName = msg.fromMe ? 'You' : senderContact.pushname || senderContact.name || 'Unknown Contact';
-
-			const chat = await msg.getChat();
-			const chatName = chat.name || msg.from; // Fallback to chat ID if name is not available
-
-			const groupInfo = msg.from.endsWith('@g.us') ? ` in group "${chatName}"` : '';
-			const chatUrl = `https://wa.me/${msg.from.replace('@c.us', '').replace('@g.us', '')}`;
-
-			client.sendMessage(
-				myContact,
+			await client.sendMessage(
+				notificationChatId, // Use the dynamically determined notification chat
 				`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nRelevance logic: ${analysisResult?.reasoning ?? "No reason provided"}\n\nChat Link: ${chatUrl}`
 			);
-		} catch (error) {
-			console.error('Error fetching contact or chat information:', error);
-			client.sendMessage(
-				myContact,
-				`[Relevant Message - Error getting sender/chat info]\nContent: ${msg.body}\nChat ID: ${msg.from}`
+			console.log(`Notification sent to ${notificationChatId}`);
+		} catch (error: any) {
+			console.error(`Error sending notification to ${notificationChatId}:`, error);
+			await client.sendMessage(
+				myClientId, // Fallback to the bot's own ID
+				`[Relevant Message - Error sending to configured chat] From: ${senderName}${groupInfo}\nContent: ${msg.body}\nChat Link: ${chatUrl}\n\nError: ${error.message}`
 			);
 		}
 	}
