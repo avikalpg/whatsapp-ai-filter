@@ -9,9 +9,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Correct path resolution:
-// If dataStore.ts is in /whatsapp-ai-filter/backend/src/
-// and 'data' should be in /whatsapp-ai-filter/data/
-// Then path.join(__dirname, '..', '..', 'data') is correct.
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 
 export let userConfig: {
