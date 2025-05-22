@@ -76,16 +76,16 @@ class LLMOrchestrator {
 
 	async analyzeMessage(message: string): Promise<LLMResponse | null> {
 		loadUserConfig();
-		const interests = userConfig.interests?.length ? userConfig.interests.join(', ') : "personal health, fitness, and nutrition";
+		const interests = userConfig.interests?.length ? userConfig.interests.join(', ') : null;
 
 		if (!interests) {
-			console.warn('User interests not defined in environment variables.');
-			return { relevant: false, reasoning: 'User interests not configured.' };
+			console.warn('User interests not defined.');
+			throw new Error('User interests not defined. Please set your interests using the command: !set interests=<your_interests>');
 		}
 
 		if (this.availableProviders.length === 0) {
 			console.warn('No LLM providers are available.');
-			return { relevant: false, reasoning: 'No LLM providers configured.' };
+			throw new Error('No LLM providers are available. Please check your environment setup.');
 		}
 
 		for (const provider of this.availableProviders) {

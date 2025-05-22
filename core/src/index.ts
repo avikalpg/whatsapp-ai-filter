@@ -80,22 +80,30 @@ client.on('message_create', async (msg: Message) => {
 		return;
 	}
 
-	const analysisResult = await analyzeMessageWithLLM(msg.body);
-	console.debug('LLM Analysis Result:', analysisResult);
+	try {
+		const analysisResult = await analyzeMessageWithLLM(msg.body);
+		console.debug('LLM Analysis Result:', analysisResult);
 
-	if (analysisResult?.relevant) {
-		try {
-			await client.sendMessage(
-				notificationChatId, // Use the dynamically determined notification chat
-				`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nRelevance logic: ${analysisResult?.reasoning ?? "No reason provided"}\n\nChat Link: ${chatUrl}`
-			);
-			console.log(`Notification sent to ${notificationChatId}`);
-		} catch (error: any) {
-			console.error(`Error sending notification to ${notificationChatId}:`, error);
-			await client.sendMessage(
-				myClientId, // Fallback to the bot's own ID
-				`[Relevant Message - Error sending to configured chat] From: ${senderName}${groupInfo}\nContent: ${msg.body}\nChat Link: ${chatUrl}\n\nError: ${error.message}`
-			);
+		if (analysisResult?.relevant) {
+			try {
+				await client.sendMessage(
+					notificationChatId,
+					`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nRelevance logic: ${analysisResult?.reasoning ?? "No reason provided"}\n\nChat Link: ${chatUrl}`
+				);
+				console.log(`Notification sent to ${notificationChatId}`);
+			} catch (error: any) {
+				console.error(`Error sending notification to ${notificationChatId}:`, error);
+				await client.sendMessage(
+					myClientId, // Fallback to the bot's own ID
+					`[Relevant Message - Error sending to configured chat] From: ${senderName}${groupInfo}\nContent: ${msg.body}\nChat Link: ${chatUrl}\n\nError: ${error.message}`
+				);
+			}
 		}
+	} catch (error: any) {
+		console.error('Error analyzing message:', error);
+		await client.sendMessage(
+			notificationChatId,
+			`[Error] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nError: ${error.message}`
+		);
 	}
 });
