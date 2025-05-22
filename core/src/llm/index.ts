@@ -17,8 +17,6 @@ class LLMOrchestrator {
 	private availableProviders: { name: string; analyze: (message: string, interests: string) => Promise<LLMResponse | null> }[] = [];
 
 	constructor() {
-		loadUserConfig();
-		console.log('User configuration loaded:', userConfig, typeof userConfig);
 		this.initProviders();
 	}
 
@@ -77,6 +75,7 @@ class LLMOrchestrator {
 	}
 
 	async analyzeMessage(message: string): Promise<LLMResponse | null> {
+		loadUserConfig();
 		const interests = userConfig.interests?.length ? userConfig.interests.join(', ') : "personal health, fitness, and nutrition";
 
 		if (!interests) {
