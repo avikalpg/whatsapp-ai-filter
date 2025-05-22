@@ -29,7 +29,6 @@ export async function syncDataFromSelfChatHistory(client: Client, options?: { fo
 		// Fetch a reasonable number of messages. Adjust 'limit' as needed.
 		// Be mindful of WhatsApp's rate limits if fetching too many.
 		const messages = await targetChat.fetchMessages({ limit: 200 });
-		Object.keys(userConfig).forEach(key => delete userConfig[key]);
 		for (const msg of messages.reverse()) {
 			if (msg.fromMe && msg.body.startsWith('!')) {
 				console.log(`Replaying history command: ${msg.body}`);
