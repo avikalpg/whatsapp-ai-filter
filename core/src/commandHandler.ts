@@ -77,7 +77,6 @@ export async function handleSelfChatCommand(msg: Message) {
 			break;
 
 		// !set_command_chat and !set_notification_chat commands are now handled directly in index.ts
-		// This 'default' will catch any other commands that aren't defined here.
 		default:
 			await msg.reply(`Unknown command: ${mainCommand}. Available commands: !set, !get, !list.
             To set command/notification chats, use '!set_command_chat' or '!set_notification_chat' in the desired chat.`);
