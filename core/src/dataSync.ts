@@ -1,44 +1,44 @@
 // backend/src/dataSync.ts
-import { Client, Message } from 'whatsapp-web.js';
+import { Client, Message, Chat } from 'whatsapp-web.js';
 import { userConfig, saveUserConfig } from './dataStore.js';
 import { handleSelfChatCommand } from './commandHandler.js';
 
-export async function syncDataFromSelfChatHistory(client: Client) {
-	console.log('Starting data sync from self-chat history...');
+export async function syncDataFromSelfChatHistory(client: Client, options?: { force?: boolean, chatId?: string }) {
+	console.log('Starting data sync...');
 	try {
-		const chats = await client.getChats();
-		const selfChat = chats.find(chat => chat.id.user === client.info.wid.user && !chat.isGroup); // Find your own chat
-		// In multi-device, your own chat is usually the one where from === to for messages.
-		// Or you can get your own ID using client.info.wid and find messages where msg.from === client.info.wid.user.
+		// If user_config already exists and not forced, do nothing
+		if (!options?.force) {
+			if (userConfig && Object.keys(userConfig).length > 0 && userConfig.interests) {
+				console.log('User config already exists. Skipping data sync.');
+				return;
+			}
+		}
 
-		if (!selfChat) {
-			console.warn('Self-chat not found. Cannot sync history.');
+		const chats = await client.getChats();
+		// Use the dedicated command chat if provided, else fallback to self-chat
+		let targetChatId = options?.chatId || userConfig.commandChatId;
+		if (!targetChatId) {
+			targetChatId = client.info.wid._serialized;
+		}
+		const targetChat = chats.find((chat: Chat) => chat.id._serialized === targetChatId);
+		if (!targetChat) {
+			console.warn('Target command chat not found. Cannot sync history.');
 			return;
 		}
 
 		// Fetch a reasonable number of messages. Adjust 'limit' as needed.
 		// Be mindful of WhatsApp's rate limits if fetching too many.
-		const messages = await selfChat.fetchMessages({ limit: 200 }); // Fetch last 200 messages
-
-		// Clear current in-memory state before rebuilding
-		// For now, let's just re-initialize userConfig.
-		// In a real scenario, you'd manage your data structures more carefully.
+		const messages = await targetChat.fetchMessages({ limit: 200 });
 		Object.keys(userConfig).forEach(key => delete userConfig[key]);
-
-		// Process messages in reverse order (oldest first) to apply commands sequentially
 		for (const msg of messages.reverse()) {
-			if (msg.fromMe && msg.to === msg.from && msg.body.startsWith('!')) {
-				// This is a self-chat command/data entry
+			if (msg.fromMe && msg.body.startsWith('!')) {
 				console.log(`Replaying history command: ${msg.body}`);
-				// This is where you'd parse and apply the command/data
-				// Similar to handleSelfChatCommand, but optimized for replay
-				await handleSelfChatCommand(msg) // A dedicated function for history replay
+				await handleSelfChatCommand(msg);
 			}
 		}
-		saveUserConfig(); // Save the rebuilt state after sync
-		console.log('Data sync from self-chat history complete.');
-
+		saveUserConfig();
+		console.log('Data sync from command chat history complete.');
 	} catch (error) {
-		console.error('Error during self-chat history sync:', error);
+		console.error('Error during command chat history sync:', error);
 	}
 }
