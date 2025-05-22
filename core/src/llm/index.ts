@@ -15,18 +15,13 @@ interface LLMResponse {
 
 class LLMOrchestrator {
 	private availableProviders: { name: string; analyze: (message: string, interests: string) => Promise<LLMResponse | null> }[] = [];
-	private userInterests: string | undefined;
 
 	constructor() {
-		loadUserConfig();
-		console.log('User configuration loaded:', userConfig, typeof userConfig);
-		this.userInterests = userConfig.interests?.length ? userConfig.interests.join(', ') : "personal health, fitness, and nutrition";
-
 		this.initProviders();
 	}
 
 	private initProviders() {
-		if (process.env.PERPLEXITY_API_KEY && this.userInterests) {
+		if (process.env.PERPLEXITY_API_KEY) {
 			this.availableProviders.push({
 				name: 'perplexity',
 				analyze: async (message: string, interests: string) => {
@@ -51,7 +46,7 @@ class LLMOrchestrator {
 			});
 		}
 
-		if (process.env.OPENAI_API_KEY && this.userInterests) {
+		if (process.env.OPENAI_API_KEY) {
 			this.availableProviders.push({
 				name: 'openai',
 				analyze: async (message: string, interests: string) => {
@@ -80,19 +75,22 @@ class LLMOrchestrator {
 	}
 
 	async analyzeMessage(message: string): Promise<LLMResponse | null> {
-		if (!this.userInterests) {
-			console.warn('User interests not defined in environment variables.');
-			return { relevant: false, reasoning: 'User interests not configured.' };
+		loadUserConfig();
+		const interests = userConfig.interests?.length ? userConfig.interests.join(', ') : null;
+
+		if (!interests) {
+			console.warn('User interests not defined.');
+			throw new Error('User interests not defined. Please set your interests using the command: !set interests=<your_interests>');
 		}
 
 		if (this.availableProviders.length === 0) {
 			console.warn('No LLM providers are available.');
-			return { relevant: false, reasoning: 'No LLM providers configured.' };
+			throw new Error('No LLM providers are available. Please check your environment setup.');
 		}
 
 		for (const provider of this.availableProviders) {
 			console.debug(`Attempting to analyze with ${provider.name}...`);
-			const result = await provider.analyze(message, this.userInterests);
+			const result = await provider.analyze(message, interests);
 			if (result?.relevant !== undefined) {
 				console.log(`Message analyzed successfully by ${provider.name}. Relevant: ${result.relevant}, Reasoning: ${result.reasoning}`);
 				return result;
