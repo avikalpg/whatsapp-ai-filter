@@ -4,6 +4,7 @@ import { analyzeMessageWithPerplexity, PerplexityResponse } from './perplexity.j
 import { analyzeMessageWithOpenAi, OpenAiResponse } from './openai.js';
 import { z } from 'zod';
 import { RelevanceCheckResponseSchema, RelevanceCheckResponse } from './schemas.js';
+import { loadUserConfig, userConfig } from '../dataStore.js';
 
 interface LLMResponse {
 	relevant: boolean | null;
@@ -14,9 +15,13 @@ interface LLMResponse {
 
 class LLMOrchestrator {
 	private availableProviders: { name: string; analyze: (message: string, interests: string) => Promise<LLMResponse | null> }[] = [];
-	private userInterests: string | undefined = process.env.USER_INTERESTS;
+	private userInterests: string | undefined;
 
 	constructor() {
+		loadUserConfig();
+		console.log('User configuration loaded:', userConfig, typeof userConfig);
+		this.userInterests = userConfig.interests?.length ? userConfig.interests.join(', ') : "personal health, fitness, and nutrition";
+
 		this.initProviders();
 	}
 
