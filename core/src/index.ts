@@ -21,8 +21,6 @@ client.on('message_create', async (msg: Message) => {
 
 	const isActuallyGroup = actualChatId.endsWith('@g.us');
 	const groupInfo = isActuallyGroup ? ` in group "${chatName}"` : '';
-	const chatUrl = `https://wa.me/${actualChatId.replace('@c.us', '').replace('@g.us', '')}`;
-
 
 	console.log('Received message:', {
 		from: msg.from,
@@ -80,30 +78,31 @@ client.on('message_create', async (msg: Message) => {
 		return;
 	}
 
-	try {
-		const analysisResult = await analyzeMessageWithLLM(msg.body);
-		console.debug('LLM Analysis Result:', analysisResult);
-
-		if (analysisResult?.relevant) {
-			try {
-				await client.sendMessage(
-					notificationChatId,
-					`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nRelevance logic: ${analysisResult?.reasoning ?? "No reason provided"}\n\nChat Link: ${chatUrl}`
-				);
-				console.log(`Notification sent to ${notificationChatId}`);
-			} catch (error: any) {
-				console.error(`Error sending notification to ${notificationChatId}:`, error);
-				await client.sendMessage(
-					myClientId, // Fallback to the bot's own ID
-					`[Relevant Message - Error sending to configured chat] From: ${senderName}${groupInfo}\nContent: ${msg.body}\nChat Link: ${chatUrl}\n\nError: ${error.message}`
-				);
-			}
-		}
-	} catch (error: any) {
-		console.error('Error analyzing message:', error);
+	const analysisResult = await analyzeMessageWithLLM(msg.body).catch(async (error) => {
+		console.error('Error analyzing message with LLM:', error);
 		await client.sendMessage(
 			notificationChatId,
-			`[Error] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nError: ${error.message}`
+			`[Error] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nError: ${error.message}`,
+			{ quotedMessageId: msg.id._serialized }
 		);
+	})
+	console.debug('LLM Analysis Result:', analysisResult);
+
+	if (analysisResult?.relevant) {
+		try {
+			await client.sendMessage(
+				notificationChatId,
+				`[Relevant Message] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nRelevance logic: ${analysisResult?.reasoning ?? "No reason provided"}`,
+				{ quotedMessageId: msg.id._serialized }
+			);
+			console.log(`Notification sent to ${notificationChatId} quoting message ID: ${msg.id._serialized}`);
+		} catch (error: any) {
+			console.error(`Error sending notification to ${notificationChatId} with quote:`, error);
+			// Fallback to sending without quote if quoting failed (e.g., message not found, though rare here)
+			await client.sendMessage(
+				myClientId,
+				`[Relevant Message - Error sending to configured chat with quote] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nError: ${error.message}`
+			);
+		}
 	}
 });
