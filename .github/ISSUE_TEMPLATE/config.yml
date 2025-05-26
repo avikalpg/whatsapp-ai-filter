@@ -1,10 +1,17 @@
 name: 'Issue Templates'
 description: 'Choose a template for your issue.'
-labels:
-  - bug
-  - feature
-body:
-  - type: markdown
-    attributes:
-      value: |
-        Please select the appropriate template for your issue.
+# labels: - bug - feature (These labels would apply to the chooser itself, which is not usually desired. Labels are better defined in the individual templates.)
+blank_issues_enabled: true # Allows users to open a blank issue if no template fits
+contact_links:
+  - name: View documentation
+    url: https://github.com/avikalpg/whatsapp-ai-filter/blob/main/README.md
+    about: Read the project documentation and setup guide
+  - name: Browse existing issues
+    url: https://github.com/avikalpg/whatsapp-ai-filter/issues
+    about: Check if your issue already exists before creating a new one
+  - name: Ask a question
+    url: https://github.com/avikalpg/whatsapp-ai-filter/discussions # Replace with your Discussions link if you have one
+    about: Ask questions and get help from the community.
+  - name: Get support
+    url: https://github.com/avikalpg/whatsapp-ai-filter/issues/new # You can link to a specific support issue template if you create one
+    about: If you need specific support, please check existing issues or open a new one.

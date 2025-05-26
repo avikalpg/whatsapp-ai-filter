@@ -187,7 +187,7 @@ Once your bot is running with PM2, you can use these commands to manage it:
 
 ## 🌎 Landing Page
 
-The project includes a landing page built with Next.js to provide information about WhatsApp-AI-Filter. For instructions on developing or building the landing page, please refer to the [`landing-page/README.md`](https://www.google.com/search?q=landing-page/README.md) file within that directory.
+The project includes a landing page built with Next.js to provide information about WhatsApp-AI-Filter. For instructions on developing or building the landing page, please refer to the [`landing-page/README.md`](landing-page/README.md) file within that directory.
 
 1.  Navigate to the `landing-page` directory:
     ```bash

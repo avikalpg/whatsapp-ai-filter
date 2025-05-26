@@ -6,7 +6,7 @@ If you discover a security vulnerability in WhatsApp AI Filter, please report it
 
 Instead, email the maintainers at:
 
-[**avikalpgupta at gmail dot com**](mailto:avikalpgupta+whatsappaibot@gmail.com)
+[**avikalpgupta at gmail dot com**](mailto:avikalpgupta+whatsappaifilter@gmail.com)
 
 Please include as much detail as possible:
 - A description of the vulnerability
