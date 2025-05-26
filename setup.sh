@@ -85,26 +85,31 @@ fi
 
 # Step 5: Collect Environment Variables and Create .env file
 echo -e "\nStep 5/6: Configuring Environment Variables"
-echo "Please provide your API keys for the bot to function."
+echo "Please provide at least one API key for the bot to function (Perplexity AI or OpenAI)."
+echo "If you don't want to use a specific AI, just press Enter to leave its key empty."
 echo "Your input will be hidden for security."
 
-# Prompt for OPENAI_API_KEY
-OPENAI_KEY=""
-while [ -z "$OPENAI_KEY" ]; do
-    read -s -p "Enter your OpenAI API Key (e.g., sk-xxxxxxxxxxxxxxxxx): " OPENAI_KEY
-    echo
-    if [ -z "$OPENAI_KEY" ]; then
-        echo "OpenAI API Key cannot be empty. Please try again."
-    fi
-done
-
-# Prompt for PERPLEXITY_API_KEY
 PERPLEXITY_KEY=""
-while [ -z "$PERPLEXITY_KEY" ]; do
-    read -s -p "Enter your Perplexity API Key (e.g., pxk-xxxxxxxxxxxxxxxxx): " PERPLEXITY_KEY
+OPENAI_KEY=""
+ALL_KEYS_EMPTY=true
+
+# Loop until at least one key is provided
+while $ALL_KEYS_EMPTY; do
+    echo "" # Newline for clarity in the loop
+
+    # Prompt for PERPLEXITY_API_KEY (Recommended first)
+    read -s -p "Enter your Perplexity AI Key (optional, e.g., pxk-xxxxxxxxxxxxxxxxx): " PERPLEXITY_KEY
     echo
-    if [ -z "$PERPLEXITY_KEY" ]; then
-        echo "Perplexity API Key cannot be empty. Please try again."
+
+    # Prompt for OPENAI_API_KEY
+    read -s -p "Enter your OpenAI API Key (optional, e.g., sk-xxxxxxxxxxxxxxxxx): " OPENAI_KEY
+    echo
+
+    if [ -z "$PERPLEXITY_KEY" ] && [ -z "$OPENAI_KEY" ]; then
+        echo "ERROR: You must provide at least one API key (Perplexity AI or OpenAI). Please try again."
+        ALL_KEYS_EMPTY=true # Keep looping
+    else
+        ALL_KEYS_EMPTY=false # Exit loop
     fi
 done
 
