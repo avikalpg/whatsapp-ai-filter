@@ -2,10 +2,13 @@
 
 **Filter the Noise, Focus on What Matters in WhatsApp.**
 
-[![NodeJS](https://img.shields.io/badge/Node.js-v18%2B-green?logo=nodedotjs)](https://nodejs.org/)
+[![NodeJS](https://img.shields.io/badge/Node.js-v20%2B-green?logo=nodedotjs)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Enabled-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![PM2](https://img.shields.io/badge/PM2-Process%20Manager-orange?logo=pm2)](https://pm2.keymetrics.io/)
 [![License: MIT](https://img.shields.io/badge/License-GPLv3-yellow.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Top Language](https://img.shields.io/github/languages/top/avikalpg/whatsapp-ai-filter)](https://github.com/avikalpg/whatsapp-ai-filter)
+[![GitHub Stars](https://img.shields.io/github/stars/avikalpg/whatsapp-ai-filter?style=social)](https://github.com/avikalpg/whatsapp-ai-filter/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/avikalpg/whatsapp-ai-filter?style=social)](https://github.com/avikalpg/whatsapp-ai-filter/network/members)
 
 -----
 
