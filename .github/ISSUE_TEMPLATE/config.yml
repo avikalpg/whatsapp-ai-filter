@@ -1,0 +1,10 @@
+name: 'Issue Templates'
+description: 'Choose a template for your issue.'
+labels:
+  - bug
+  - feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please select the appropriate template for your issue.
