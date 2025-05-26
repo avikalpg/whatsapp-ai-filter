@@ -1,50 +1,193 @@
-# WhatsApp-AI-Filter
+# 🤖 WhatsApp AI Filter
 
 **Filter the Noise, Focus on What Matters in WhatsApp.**
 
-## Overview
+[![NodeJS](https://img.shields.io/badge/Node.js-v20%2B-green?logo=nodedotjs)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Enabled-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![PM2](https://img.shields.io/badge/PM2-Process%20Manager-orange?logo=pm2)](https://pm2.keymetrics.io/)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-yellow.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Top Language](https://img.shields.io/github/languages/top/avikalpg/whatsapp-ai-filter)](https://github.com/avikalpg/whatsapp-ai-filter)
+[![GitHub Stars](https://img.shields.io/github/stars/avikalpg/whatsapp-ai-filter?style=social)](https://github.com/avikalpg/whatsapp-ai-filter/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/avikalpg/whatsapp-ai-filter?style=social)](https://github.com/avikalpg/whatsapp-ai-filter/network/members)
 
-WhatsApp-AI-Filter is an open-source project designed to help you manage information overload in WhatsApp groups. Running locally on your computer, this application monitors your specified WhatsApp groups and uses AI (leveraging the Perplexity Sonar API) to intelligently filter messages based on your interests. It notifies you about relevant discussions, such as meetups in specific locations or conversations about particular topics, allowing you to focus on what truly matters and ignore the noise.
+-----
 
-## Key Features
+## 🌟 Overview
 
-* **Intelligent Filtering:** Uses AI to identify and surface only the messages that are relevant to your interests.
-* **Customizable Focus:** Define keywords and topics to tailor the filtering to your specific needs.
-* **Real-time Monitoring:** Continuously monitors your chosen WhatsApp groups for new messages.
-* **Local Operation:** Runs privately on your computer, ensuring your data stays secure.
-* **Notifications:** Sends you direct WhatsApp messages for important and relevant content.
-* **Poll and RSVP Handling:** (Planned or in development) Ability to automatically respond to polls and RSVP links based on your preferences.
+WhatsApp-AI-Filter is an open-source project designed to help you manage information overload in WhatsApp groups. Running locally on your computer, this application monitors your specified WhatsApp groups and uses AI (leveraging APIs from providers like Perplexity AI) to intelligently filter messages based on your interests. It notifies you about relevant discussions, such as meetups in specific locations or conversations about particular topics, allowing you to focus on what truly matters and ignore the noise.
 
-## Getting Started
+-----
 
-### Backend Application (Run Locally)
+## ✨ Features
 
-This is the core application that monitors WhatsApp and uses AI to filter messages.
+  * **Intelligent Filtering:** Uses AI to identify and surface only the messages that are relevant to your interests.
+  * **Customizable Focus:** Define keywords and topics to tailor the filtering to your specific needs.
+  * **Real-time Monitoring:** Continuously monitors your chosen WhatsApp groups for new messages.
+  * **Local Operation:** Runs privately on your computer, ensuring your data stays secure.
+  * **Notifications:** Sends you direct WhatsApp messages for important and relevant content, often including a link back to the original message.
+  * **Multi-AI Provider Support:** Connects to both Perplexity AI (recommended) and OpenAI.
 
-1.  Navigate to the `backend` directory:
+-----
+
+## 🧠 Why Perplexity AI is Recommended
+
+While the bot supports both OpenAI and Perplexity AI, **Perplexity AI is highly recommended** for its:
+
+  * **Focus on Search and Real-time Information:** Perplexity AI excels at providing concise, accurate, and up-to-date answers sourced from the web, which is often beneficial for real-time messaging contexts.
+  * **Transparency:** It provides sources for its answers, increasing trustworthiness.
+  * **Efficiency:** Often designed for quick, factual queries, potentially leading to lower latency for filtering.
+
+-----
+
+## 🚀 Getting Started (For Developers)
+
+This guide will walk you through setting up and running the WhatsApp AI Filter Bot on Unix-like systems (Linux, macOS, or WSL on Windows).
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+  * **Node.js (v20 or newer):** [Download Node.js](https://nodejs.org/en/download/)
+  * **npm:** Comes bundled with Node.js.
+  * **Git:** [Download Git](https://git-scm.com/downloads)
+
+### 1\. Clone the Repository
+
+First, clone the project repository to your local machine:
+
+```bash
+git clone https://github.com/avikalpg/whatsapp-ai-filter.git
+cd whatsapp-ai-filter/
+```
+
+### 2\. Run the Setup Script
+
+The `setup.sh` script automates the core installation, build, and initial configuration steps. It's designed to be interactive, asking for your input and confirmation when necessary.
+
+```bash
+chmod +x setup.sh # Make the script executable
+./setup.sh        # Run the setup script
+```
+
+**What the `setup.sh` script does:**
+
+  * Navigates into the `core/` directory.
+  * Installs all Node.js dependencies (`npm install`).
+  * Builds the TypeScript project (`npm run build`).
+  * Checks for `pm2` global installation and attempts to install it if missing (may require `sudo`).
+  * **Interactively asks for your API keys (Perplexity AI and OpenAI).** You must provide at least one key. It will then create the `.env` file for you based on your input.
+  * **Guides you through WhatsApp Web authentication by scanning a QR code in your console.**
+  * Starts the bot using `pm2`.
+  * Guides you through setting up `pm2` for automatic startup after system reboots (this step will typically require you to run a `sudo` command generated by `pm2`).
+
+**Follow the on-screen prompts carefully\!**
+
+-----
+
+## ⚙️ Configuration
+
+### Environment Variables (`.env`)
+
+The bot uses environment variables for sensitive information like API keys. These are stored in a `.env` file within the `core/` directory.
+
+  * A `.env.example` file is provided in `core/` to show you the required variables.
+  * **Do not commit your actual `.env` file to Git\!** It's already in `.gitignore`.
+  * The `setup.sh` script handles the creation and population of this file based on your input.
+
+**Required Variables (at least one must be provided):**
+
+  * `OPENAI_API_KEY`: Your API key for OpenAI.
+  * `PERPLEXITY_API_KEY`: Your API key for Perplexity AI (recommended).
+
+### PM2 Ecosystem Configuration (`core/ecosystem.config.js`)
+
+The `core/ecosystem.config.js` file configures how PM2 runs your bot. It defines the application name, entry point, and logging behavior.
+
+  * **`name`**: `whatsapp-ai-filter`
+  * **`script`**: `dist/index.js` (relative to the `core/` directory)
+  * **`log_file`**: Logs are directed to files within the `core/logs/` directory.
+
+-----
+
+## 🚀 Usage
+
+Once the backend application is running and authenticated:
+
+  * It will monitor the WhatsApp groups you are part of.
+  * New messages in those groups will be sent to the configured AI API (Perplexity AI or OpenAI) for analysis.
+  * If a message is deemed relevant based on the application's logic and your configured interests, you will receive a direct message on your WhatsApp account from the same WhatsApp Web session. These notifications will often include a link back to the original message for quick access.
+
+-----
+
+## 🔄 Updating the Bot
+
+To update your bot to the latest version from the Git repository:
+
+1.  Navigate to your `core/` directory:
     ```bash
-    cd backend
+    cd whatsapp-ai-filter/core/
     ```
-2.  Install dependencies:
+2.  Run the update script:
     ```bash
-    npm install
-    # or
-    yarn install
+    chmod +x update.sh # Only needed once if you haven't done it
+    ./update.sh
     ```
-3.  Create a `.env` file in the `backend` directory and add your Perplexity API key:
-    ```env
-    PERPLEXITY_API_KEY=your_perplexity_api_key_here
-    ```
-    **Remember to replace `your_perplexity_api_key_here` with your actual API key.**
-4.  Run the application:
+
+**What the `update.sh` script does:**
+
+  * Pulls the latest changes from the `main` branch.
+  * Installs any new or updated Node.js dependencies.
+  * Rebuilds the project.
+  * Restarts the bot process using PM2.
+
+### Automated Updates (Cron Job)
+
+For automatic, regular updates (e.g., hourly), you can set up a cron job on your system.
+
+1.  Open your crontab for editing:
+
     ```bash
-    node whatsapp.js
+    crontab -e
     ```
-    Follow the prompts in the console to authenticate with WhatsApp Web by scanning the QR code.
 
-### Landing Page
+2.  Add the following line to the end of the file. Remember to **replace `/path/to/your/whatsapp-ai-filter/core/`** with the actual absolute path on your system.
 
-The project includes a landing page built with Next.js to provide information about WhatsApp-AI-Filter. For instructions on developing or building the landing page, please refer to the [landing-page/README.md](landing-page/README.md) file within that directory.
+    ```cron
+    0 * * * * /path/to/your/whatsapp-ai-filter/core/update.sh >> /path/to/your/whatsapp-ai-filter/core/logs/cron_output.log 2>&1
+    ```
+
+    This example will run the update script every hour at the 0-minute mark.
+
+3.  Save and exit the crontab editor.
+
+4.  You can review cron job output in `core/logs/cron_output.log` for any errors or update notifications.
+
+-----
+
+## 💻 PM2 Management Commands
+
+Once your bot is running with PM2, you can use these commands to manage it:
+
+  * **Check status:** `pm2 status`
+  * **View live logs:** `pm2 logs whatsapp-ai-filter`
+  * **Stop the bot:** `pm2 stop whatsapp-ai-filter`
+  * **Restart the bot:** `pm2 restart whatsapp-ai-filter`
+  * **Delete the bot from PM2:** `pm2 delete whatsapp-ai-filter`
+  * **Save current PM2 processes (for auto-restart on boot):** `pm2 save`
+
+-----
+
+## 🌐 Cross-Platform Notes
+
+  * The provided `setup.sh` and `update.sh` scripts are designed for **Unix-like operating systems** (Linux, macOS).
+  * **Windows users** can run these scripts using [WSL (Windows Subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/) or Git Bash, which provides a Unix-like environment.
+  * Native Windows batch (`.bat`) or PowerShell (`.ps1`) scripts are not currently provided.
+
+-----
+
+## 🌎 Landing Page
+
+The project includes a landing page built with Next.js to provide information about WhatsApp-AI-Filter. For instructions on developing or building the landing page, please refer to the [`landing-page/README.md`](landing-page/README.md) file within that directory.
 
 1.  Navigate to the `landing-page` directory:
     ```bash
@@ -52,24 +195,21 @@ The project includes a landing page built with Next.js to provide information ab
     ```
 2.  Follow the instructions in the `README.md` file there to install dependencies and run or build the landing page.
 
-## Usage
+-----
 
-Once the backend application is running and authenticated:
+## 👋 Contributing
 
-* It will monitor the WhatsApp groups you are part of.
-* New messages in those groups will be sent to the Perplexity Sonar API for analysis.
-* If a message is deemed relevant based on the application's logic and your configured interests, you will receive a direct message on your WhatsApp account from the same WhatsApp Web session.
-* (Future) The application may automatically respond to polls and RSVP links based on its configuration.
+We welcome contributions\! If you'd like to improve this bot, please follow these steps:
 
-## Contributing
-
-We welcome contributions to make WhatsApp-AI-Filter even better! Please follow these guidelines:
-
-1.  Fork the repository on GitHub.
-2.  Create a new branch for your feature or bug fix.
+1.  Fork the repository and clone your own fork.
+2.  Create a new branch (`git checkout -b feature/YourFeature`).
 3.  Make your changes and ensure they are well-tested.
-4.  Submit a pull request with a clear description of your changes.
+4.  Commit your changes (`git commit -m 'Descriptive commit message with prefix like feat, fix, refactor or deploy'`).
+5.  Push to the branch (`git push origin feature/YourFeature`).
+6.  Open a Pull Request.
 
-## License
+-----
 
-This project is licensed under the terms of the [GNU GPL v3](LICENSE) license. See the `LICENSE` file in the root directory for more details.
+## 📄 License
+
+This project is licensed under the [**GNU General Public License v3.0**](LICENSE).
