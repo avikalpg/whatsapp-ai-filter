@@ -23,6 +23,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
+    "build": "tsc",
+    "serve": "node dist/index.js",
     "start": "node --loader ts-node/esm --env-file=.env src/index.ts",
     "dev": "nodemon src/index.ts"
   },
