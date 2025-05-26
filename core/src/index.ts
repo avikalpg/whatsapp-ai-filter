@@ -1,4 +1,4 @@
-// backend/src/index.ts
+import 'dotenv/config';
 console.info('WhatsApp AI Filter backend is starting...');
 import client from './whatsapp.js';
 import { analyzeMessageWithLLM } from './llm/index.js';

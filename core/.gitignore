@@ -1,6 +1,9 @@
 # Node.js dependencies
 node_modules/
 
+# Deployment directories
+dist/
+
 # Logs
 logs/
 *.log
