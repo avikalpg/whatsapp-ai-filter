@@ -1,4 +1,4 @@
-// backend/src/whatsapp.ts
+// core/src/whatsapp.ts
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode';
@@ -62,7 +62,7 @@ Hello! I'm your WhatsApp AI Filter bot.
 You can set these to the same chat (e.g., a dedicated group) or different ones. We recommend creating dedicated groups for each, which will just have you in them.
 
 Type \`!list\` to see your current settings.
-	`;
+    `;
 
 	// Send the greeting message to the user's self-chat
 	try {
@@ -82,7 +82,7 @@ You can set multiple interests by separating them with commas, e.g., \`!set inte
 
 Copy the below and paste it into this chat to get started:
 \`!set interests=AI, WhatsApp automation\`
-	`;
+    `;
 	try {
 		await client.sendMessage(myClientId, getStartedMessage.trim());
 		console.log('Get started message sent to self-chat.');
@@ -93,13 +93,6 @@ Copy the below and paste it into this chat to get started:
 	console.log('Current user config after sync and defaults:', userConfig);
 });
 
-client.initialize()
-	.then(() => {
-		console.info('WhatsApp Web client initialized successfully.');
-	})
-	.catch(err => {
-		console.error('Error initializing WhatsApp Web client:', err);
-	});
 
 // The 'message' event will be handled in index.ts
 export default client;
