@@ -7,12 +7,12 @@ import { saveUserConfig, userConfig } from './dataStore.js';
 import { Message, Contact, Chat } from 'whatsapp-web.js'; // Import Message, Contact, Chat for type hints
 import { analyticsManager } from './analyticsManager.js';
 
-// Define your main asynchronous startup function
 async function main() {
 	// 1. Initialize analytics manager FIRST.
 	// This ensures installation_id is ready before any potential data collection.
 	await analyticsManager.init();
 	console.log('Analytics Manager Initialized.');
+
 	if (analyticsManager.isEnabled()) {
 		console.log(`Analytics enabled. Installation ID: ${analyticsManager.getInstallationId()}`);
 	} else {
@@ -105,17 +105,25 @@ async function main() {
 			return;
 		}
 
-		const analysisResult = await analyzeMessageWithLLM(msg.body).catch(async (error) => {
-			console.error('Error analyzing message with LLM:', error);
-			await client.sendMessage(
-				notificationChatId,
-				`[Error] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nError: ${error.message}`,
-				{ quotedMessageId: msg.id._serialized }
-			);
-		})
+		const analysisResult = await analyzeMessageWithLLM(msg.body)
+			.then((result) => {
+				analyticsManager.incrementMessagesAnalyzed();
+				return result;
+			})
+			.catch(async (error) => {
+				console.error('Error analyzing message with LLM:', error);
+				// AI API failure metrics are handled within llm/index.ts's orchestrator
+				await client.sendMessage(
+					notificationChatId,
+					`[Error] From: ${senderName}${groupInfo}\nContent: ${msg.body}\n\nError: ${error.message}`,
+					{ quotedMessageId: msg.id._serialized }
+				);
+				return null;
+			});
 		console.debug('LLM Analysis Result:', analysisResult);
 
 		if (analysisResult?.relevant) {
+			analyticsManager.incrementMessagesRelevant();
 			try {
 				await client.sendMessage(
 					notificationChatId,
@@ -137,8 +145,7 @@ async function main() {
 	console.log('Bot application fully started and ready to process messages.');
 }
 
-// Call the main function to start the application and handle any top-level errors
 main().catch(error => {
 	console.error('FATAL ERROR: Bot application failed to start:', error);
-	process.exit(1); // Exit with an error code to indicate a critical startup failure
+	process.exit(1);
 });
