@@ -4,18 +4,20 @@ import db from '../../../utils/db';
 export async function POST(req: NextRequest) {
 	const analyticsData = await req.json();
 
-	// Basic validation (you'll want more robust validation here)
-	if (!analyticsData.installation_id || analyticsData.messages_analyzed_count === undefined) {
-		return NextResponse.json({ message: 'Missing required analytics data' }, { status: 400 });
-	}
+	const installationId = (typeof analyticsData.installation_id === 'string') ? analyticsData.installation_id.trim() : '';
 
-	console.log('Received analyticsData:', analyticsData);
-	console.log('Type of installation_id:', typeof analyticsData.installation_id);
-	console.log('Value of installation_id:', analyticsData.installation_id);
+	// Basic validation (you'll want more robust validation here)
+	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+	if (!installationId || !uuidRegex.test(installationId) || analyticsData.messages_analyzed_count === undefined) {
+		console.error('Invalid installation_id or analytics data:', {
+			installationId,
+			analyticsData
+		});
+		return NextResponse.json({ message: 'Missing or invalid installation_id or analytics data' }, { status: 400 });
+	}
 
 	try {
 		// Example INSERT statement (adjust column names to match your schema precisely)
-		// Ensure that JSONB fields are passed as JavaScript objects, pg will handle conversion
 		const result = await db.query(
 			`INSERT INTO analytics (
         installation_id, recorded_at, app_version, node_version, os_platform,
@@ -26,8 +28,8 @@ export async function POST(req: NextRequest) {
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
        ) RETURNING id`,
 			[
-				analyticsData.installation_id,
-				analyticsData.recorded_at || new Date().toISOString(), // Use client timestamp or default to now
+				installationId,
+				analyticsData.recorded_at || new Date().toISOString(),
 				analyticsData.app_version,
 				analyticsData.node_version,
 				analyticsData.os_platform,
