@@ -11,7 +11,6 @@ ECOSYSTEM_CONFIG_FILE="ecosystem.config.js"
 run_command_with_confirm() {
     local cmd="$1"
     local prompt="$2"
-    local allow_sudo="$3" # "true" if sudo is allowed for this command
 
     echo -e "\n--- Action Required ---"
     echo "About to run: $cmd"
@@ -22,11 +21,9 @@ run_command_with_confirm() {
             eval "$cmd"
             local status=$?
             if [ $status -ne 0 ]; then
-                if [ "$allow_sudo" = "true" ]; then
-                    echo "Command failed without sudo. Trying with sudo..."
-                    eval "sudo $cmd" # This will prompt user for password
-                    status=$?
-                fi
+                echo "Command failed without sudo. Trying with sudo..."
+                eval "sudo $cmd"
+                status=$?
             fi
             return $status # Return the status of the command
             ;;
@@ -73,6 +70,7 @@ echo "Project built successfully."
 echo -e "\nStep 4/6: PM2 Installation Check and Automatic Install (if needed)"
 if ! command -v pm2 &> /dev/null; then
     echo "PM2 is not installed globally."
+    # The run_command_with_confirm handles the sudo prompt if npm needs it for global installs
     if ! run_command_with_confirm "npm install -g pm2" "Ready to install PM2 globally? (May require sudo password if npm cannot install globally without it)"; then
         echo "ERROR: Failed to install PM2 globally or operation cancelled. Please install it manually:"
         echo "       'npm install -g pm2' or 'sudo npm install -g pm2'"
