@@ -113,14 +113,33 @@ while $ALL_KEYS_EMPTY; do
     fi
 done
 
+echo -e "\n--- Anonymous Usage Analytics ---"
+echo "To help improve this tool, we collect anonymous usage data (e.g., messages processed, AI provider usage, bot uptime)."
+echo "This data helps us understand how the bot is used and where to focus development efforts."
+echo "No personal information or message content is ever collected."
+echo "You can disable this at any time by editing the ANALYTICS_ENABLED variable in your $CORE_DIR/.env file."
+
+# Prompt for user preference (defaulting to Y)
+read -p "Enable anonymous usage analytics? (Y/n, default: Y): " -n 1 -r REPLY
+echo # (optional) move to a new line
+
+ANALYTICS_ENABLED_VALUE="true" # Default to true
+if [[ "$REPLY" =~ ^[Nn]$ ]]; then
+    ANALYTICS_ENABLED_VALUE="false"
+    echo "Anonymous usage analytics DISABLED."
+else
+    echo "Anonymous usage analytics ENABLED."
+fi
+
 # You can add more prompts for other variables here if needed
 # Example:
 # read -p "Enter optional setting (default: value): " OPTIONAL_SETTING
 # OPTIONAL_SETTING="${OPTIONAL_SETTING:-defaultValue}"
 
-# Construct .env content
+# Construct .env content with all variables
 ENV_CONTENT="OPENAI_API_KEY=$OPENAI_KEY
 PERPLEXITY_API_KEY=$PERPLEXITY_KEY
+ANALYTICS_ENABLED=$ANALYTICS_ENABLED_VALUE
 " # Add other collected variables here if needed
 
 # Create .env file
@@ -167,5 +186,5 @@ echo -e "\n--------------------------------------------------"
 echo "WhatsApp AI Filter Bot Setup Complete!"
 echo "You can check the bot's status with: 'pm2 status'"
 echo "View logs with: 'pm2 logs $PM2_APP_NAME'"
-echo "To update the bot later, run: '$CORE_DIR/update.sh'"
+echo "To update the bot later, run: '$CORE_DIR/update-deployment.sh'"
 echo "--------------------------------------------------"
