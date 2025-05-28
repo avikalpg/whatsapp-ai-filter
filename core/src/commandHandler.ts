@@ -15,7 +15,7 @@ export async function handleSelfChatCommand(msg: Message) {
 
 			if (equalsIndex > 0) {
 				const key = setValuePart.substring(0, equalsIndex).trim();
-				const value = setValuePart.substring(equalsIndex + 2).trim();
+				const value = setValuePart.substring(equalsIndex + 1).trim();
 
 				if (key) {
 					if (key.toLowerCase() === "interests") {
@@ -30,10 +30,10 @@ export async function handleSelfChatCommand(msg: Message) {
 						await msg.reply(`Set "${key}" to: "${value}"`);
 					}
 				} else {
-					await msg.reply('Usage: !set <key>=<value>');
+					await msg.reply('Usage: `!set <key>=<value>`');
 				}
 			} else {
-				await msg.reply('Usage: !set <key>=<value>');
+				await msg.reply('Usage: `!set <key>=<value>`');
 			}
 			break;
 

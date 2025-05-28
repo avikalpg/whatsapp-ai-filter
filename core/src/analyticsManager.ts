@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 // Correct path resolution:
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
-const ROOT_DIR = path.join(__dirname, '..', '..');
+const ROOT_DIR = path.join(__dirname, '..');
 
 function ensureDataDir() {
 	if (!fs.existsSync(DATA_DIR)) {
