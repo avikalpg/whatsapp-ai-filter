@@ -156,7 +156,7 @@ SESSION_DIR="$CORE_DIR/.wwebjs_auth/session"
 
 if [ ! -d "$SESSION_DIR" ]; then
     echo "Starting the bot directly to display the WhatsApp QR code..."
-    node dist/index.js &
+    ( node dist/index.js ) &
     NODE_PID=$!
     echo "Waiting for WhatsApp authentication... (Scan the QR code with your WhatsApp app)"
     # Wait for the session directory to be created
@@ -164,7 +164,10 @@ if [ ! -d "$SESSION_DIR" ]; then
         sleep 1
     done
     echo "Authentication detected! Killing temporary bot process..."
-    kill $NODE_PID
+    # Kill the whole process group (macOS/Linux)
+    kill -TERM -$NODE_PID 2>/dev/null
+    # Fallback: kill any node process running dist/index.js (in case any child remains)
+    pkill -f "node dist/index.js" 2>/dev/null
     sleep 2 # Give it a moment to shut down
 else
     echo "WhatsApp session already exists. Skipping QR code authentication."
