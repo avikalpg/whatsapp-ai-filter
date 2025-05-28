@@ -14,24 +14,25 @@ export async function POST(req: NextRequest) {
 	}
 
 	const token = authHeader.split(' ')[1];
+	const analyticsData = await req.json();
+	const installationId = (typeof analyticsData.installation_id === 'string') ? analyticsData.installation_id.trim() : '';
 
 	let decodedToken: any;
 	try {
 		decodedToken = jwt.verify(token, JWT_SECRET);
-		// The token should ideally contain the installation_id to verify.
-		// For simplicity, we'll just check if it's a valid token for now.
-		// A more robust system would check decodedToken.installation_id against the payload's installation_id.
+		if (!decodedToken.installation_id || decodedToken.installation_id !== installationId) {
+			console.error('installation_id mismatch between token and payload', {
+				tokenInstallationId: decodedToken.installation_id,
+				payloadInstallationId: installationId
+			});
+			return NextResponse.json({ message: 'installation_id mismatch between token and payload' }, { status: 403 });
+		}
 	} catch (error) {
 		console.error('JWT verification failed:', error);
 		return NextResponse.json({ message: 'Invalid or expired token' }, { status: 403 });
 	}
 
 	// 2. Process Analytics Data (after authentication)
-	const analyticsData = await req.json();
-
-	const installationId = (typeof analyticsData.installation_id === 'string') ? analyticsData.installation_id.trim() : '';
-
-	// Basic validation (you'll want more robust validation here)
 	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 	if (!installationId || !uuidRegex.test(installationId) || analyticsData.messages_analyzed_count === undefined) {
 		console.error('Invalid installation_id or analytics data:', {
