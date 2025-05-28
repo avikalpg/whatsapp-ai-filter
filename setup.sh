@@ -149,8 +149,28 @@ if [ $? -ne 0 ]; then
 fi
 echo ".env file created successfully. This file is ignored by Git."
 
-# Step 6: Start Bot with PM2 and Configure Autostart
-echo -e "\nStep 6/6: Starting Bot with PM2 and Configuring Autostart"
+# Step 6: Initial WhatsApp Authentication (QR Code Scan)
+echo -e "\nStep 6/6: Initial WhatsApp Authentication (QR Code Scan)"
+
+SESSION_DIR="$CORE_DIR/.wwebjs_auth/session"
+
+if [ ! -d "$SESSION_DIR" ]; then
+    echo "Starting the bot directly to display the WhatsApp QR code..."
+    node dist/index.js &
+    NODE_PID=$!
+    echo "Waiting for WhatsApp authentication... (Scan the QR code with your WhatsApp app)"
+    # Wait for the session directory to be created
+    while [ ! -d "$SESSION_DIR" ]; do
+        sleep 1
+    done
+    echo "Authentication detected! Killing temporary bot process..."
+    kill $NODE_PID
+    sleep 2 # Give it a moment to shut down
+else
+    echo "WhatsApp session already exists. Skipping QR code authentication."
+fi
+
+echo -e "\nStarting Bot with PM2 and Configuring Autostart"
 
 if run_command_with_confirm "pm2 start \"$ECOSYSTEM_CONFIG_FILE\"" "Ready to start the bot with PM2?"; then
     echo "${PM2_APP_NAME} started successfully with PM2."
