@@ -11,7 +11,6 @@ ECOSYSTEM_CONFIG_FILE="ecosystem.config.js"
 run_command_with_confirm() {
     local cmd="$1"
     local prompt="$2"
-    local allow_sudo="$3" # "true" if sudo is allowed for this command
 
     echo -e "\n--- Action Required ---"
     echo "About to run: $cmd"
@@ -22,11 +21,9 @@ run_command_with_confirm() {
             eval "$cmd"
             local status=$?
             if [ $status -ne 0 ]; then
-                if [ "$allow_sudo" = "true" ]; then
-                    echo "Command failed without sudo. Trying with sudo..."
-                    eval "sudo $cmd" # This will prompt user for password
-                    status=$?
-                fi
+                echo "Command failed without sudo. Trying with sudo..."
+                eval "sudo $cmd"
+                status=$?
             fi
             return $status # Return the status of the command
             ;;
@@ -73,6 +70,7 @@ echo "Project built successfully."
 echo -e "\nStep 4/6: PM2 Installation Check and Automatic Install (if needed)"
 if ! command -v pm2 &> /dev/null; then
     echo "PM2 is not installed globally."
+    # The run_command_with_confirm handles the sudo prompt if npm needs it for global installs
     if ! run_command_with_confirm "npm install -g pm2" "Ready to install PM2 globally? (May require sudo password if npm cannot install globally without it)"; then
         echo "ERROR: Failed to install PM2 globally or operation cancelled. Please install it manually:"
         echo "       'npm install -g pm2' or 'sudo npm install -g pm2'"
@@ -113,14 +111,33 @@ while $ALL_KEYS_EMPTY; do
     fi
 done
 
+echo -e "\n--- Anonymous Usage Analytics ---"
+echo "To help improve this tool, we collect anonymous usage data (e.g., messages processed, AI provider usage, bot uptime)."
+echo "This data helps us understand how the bot is used and where to focus development efforts."
+echo "No personal information or message content is ever collected."
+echo "You can disable this at any time by editing the ANALYTICS_ENABLED variable in your $CORE_DIR/.env file."
+
+# Prompt for user preference (defaulting to Y)
+read -p "Enable anonymous usage analytics? (Y/n, default: Y): " -n 1 -r REPLY
+echo # (optional) move to a new line
+
+ANALYTICS_ENABLED_VALUE="true" # Default to true
+if [[ "$REPLY" =~ ^[Nn]$ ]]; then
+    ANALYTICS_ENABLED_VALUE="false"
+    echo "Anonymous usage analytics DISABLED."
+else
+    echo "Anonymous usage analytics ENABLED."
+fi
+
 # You can add more prompts for other variables here if needed
 # Example:
 # read -p "Enter optional setting (default: value): " OPTIONAL_SETTING
 # OPTIONAL_SETTING="${OPTIONAL_SETTING:-defaultValue}"
 
-# Construct .env content
+# Construct .env content with all variables
 ENV_CONTENT="OPENAI_API_KEY=$OPENAI_KEY
 PERPLEXITY_API_KEY=$PERPLEXITY_KEY
+ANALYTICS_ENABLED=$ANALYTICS_ENABLED_VALUE
 " # Add other collected variables here if needed
 
 # Create .env file
@@ -167,5 +184,5 @@ echo -e "\n--------------------------------------------------"
 echo "WhatsApp AI Filter Bot Setup Complete!"
 echo "You can check the bot's status with: 'pm2 status'"
 echo "View logs with: 'pm2 logs $PM2_APP_NAME'"
-echo "To update the bot later, run: '$CORE_DIR/update.sh'"
+echo "To update the bot later, run: '$CORE_DIR/update-deployment.sh'"
 echo "--------------------------------------------------"

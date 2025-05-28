@@ -1,7 +1,7 @@
 // backend/src/dataStore.ts
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url'; // Import fileURLToPath
+import { fileURLToPath } from 'url';
 
 // Get the current file's path in ESM
 const __filename = fileURLToPath(import.meta.url);

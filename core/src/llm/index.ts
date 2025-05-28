@@ -1,5 +1,5 @@
-// backend/src/llm/index.ts
-
+// core/src/llm/index.ts
+import { analyticsManager } from '../analyticsManager.js';
 import { analyzeMessageWithPerplexity, PerplexityResponse } from './perplexity.js';
 import { analyzeMessageWithOpenAi, OpenAiResponse } from './openai.js';
 import { z } from 'zod';
@@ -80,7 +80,7 @@ class LLMOrchestrator {
 
 		if (!interests) {
 			console.warn('User interests not defined.');
-			throw new Error('User interests not defined. Please set your interests using the command: !set interests=<your_interests>');
+			throw new Error('User interests not defined. Please set your interests using the command: `!set interests=<your_interests>`');
 		}
 
 		if (this.availableProviders.length === 0) {
@@ -90,12 +90,31 @@ class LLMOrchestrator {
 
 		for (const provider of this.availableProviders) {
 			console.debug(`Attempting to analyze with ${provider.name}...`);
-			const result = await provider.analyze(message, interests);
-			if (result?.relevant !== undefined) {
-				console.log(`Message analyzed successfully by ${provider.name}. Relevant: ${result.relevant}, Reasoning: ${result.reasoning}`);
+			const startTime = Date.now();
+
+			analyticsManager.addAiProviderMessageCount(provider.name); // Track message count for this provider
+
+			let result: LLMResponse | null = null; // Initialize result to null
+			try {
+				// Attempt to analyze the message with the current provider
+				result = await provider.analyze(message, interests);
+				const latency = Date.now() - startTime; // Calculate latency only on success
+
+				analyticsManager.recordAiApiLatency(provider.name, latency);
+				analyticsManager.incrementAiApiSuccess(provider.name);
+
+			} catch (error) {
+				console.error(`Error analyzing message with ${provider.name}:`, error);
+				analyticsManager.incrementAiApiFailure(provider.name);
+				result = null;
+			}
+
+			// If the provider returned a valid result (not null and has 'relevant' field)
+			if (result && result.relevant !== undefined && result.relevant !== null) {
+				console.debug(`Message analyzed successfully by ${provider.name}. Relevant: ${result.relevant}, Reasoning: ${result.reasoning}`);
 				return result;
 			} else {
-				console.warn(`${provider.name} failed to provide a valid analysis. Trying next provider...`);
+				console.warn(`${provider.name} returned null, failed, or provided invalid analysis. Trying next provider...`);
 			}
 		}
 

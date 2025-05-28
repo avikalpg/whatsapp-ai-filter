@@ -75,7 +75,7 @@ The project consists of two main parts: the `core/` backend (the bot itself) and
     ```
 3.  **Run the bot locally for development:**
     ```bash
-    npm start
+    npm start:dev
     ```
 	or
 	```bash
