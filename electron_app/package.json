@@ -1,0 +1,12 @@
+{
+	"name": "whatsapp-ai-filter-electron",
+	"version": "1.0.0",
+	"main": "main.js",
+	"description": "Electron app for WhatsApp AI Filter Bot",
+	"scripts": {
+		"start": "electron ."
+	},
+	"dependencies": {
+		"electron": "^30.0.0"
+	}
+}
