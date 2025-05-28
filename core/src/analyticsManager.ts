@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 
 // Correct path resolution:
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const ROOT_DIR = path.join(__dirname, '..', '..');
 
 function ensureDataDir() {
 	if (!fs.existsSync(DATA_DIR)) {
@@ -36,7 +37,6 @@ interface AnalyticsMetrics {
 	ai_api_latency_ms: { [key: string]: { total: number; count: number } }; // To calculate average latency
 	ai_api_success_counts: { [key: string]: number };
 	ai_api_failure_counts: { [key: string]: number };
-	// uptime_seconds_since_last_heartbeat will be calculated dynamically before sending
 }
 
 interface AuthTokenResponse {
@@ -49,6 +49,30 @@ const ANALYTICS_FILE_PATH = path.join(DATA_DIR, 'analytics.json');
 // Global variables for the current configuration and in-memory metrics
 let localConfig: LocalAnalyticsConfig = { analytics_enabled: true };
 let metricsCache: AnalyticsMetrics = initializeEmptyMetrics();
+
+// Keep track of application start time for uptime calculation
+const APP_START_TIME = Date.now();
+
+/**
+ * Reads the application version from package.json.
+ */
+function getAppVersion(): string | undefined {
+	try {
+		const packageJsonPath = path.join(ROOT_DIR, 'package.json');
+		const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+		return packageJson.version;
+	} catch (error) {
+		console.warn('[Analytics Manager] Could not read app version from package.json:', error);
+		return undefined;
+	}
+}
+
+/**
+ * Checks if the application is likely running under PM2.
+ */
+function isRunningWithPM2(): boolean {
+	return !!process.env.PM2_HOME || !!process.env.pm_id;
+}
 
 /**
  * Initializes an empty metrics cache.
@@ -299,19 +323,6 @@ export const analyticsManager = {
 	},
 
 	// --- Analytics Sending Mechanism ---
-
-	hasMetrics(metricsToSend: AnalyticsMetrics) {
-		return Object.values(metricsToSend).some(val =>
-			(typeof val === 'number' && val > 0) ||
-			(val && typeof val === 'object' && Object.keys(val).length > 0 &&
-				// For ai_api_latency_ms which becomes a simple object of averaged numbers
-				(val && typeof val === 'object' && 'total' in val && val.total > 0) || // Check if it's the old structure with 'total' for avg calc
-				// For simple key-value objects like ai_provider_message_counts or averaged latencies
-				Object.values(val).some(nestedVal => typeof nestedVal === 'number' && nestedVal > 0)
-			)
-		);
-	},
-
 	/**
 	 * Sends the accumulated analytics metrics to the configured API endpoint.
 	 */
@@ -340,19 +351,27 @@ export const analyticsManager = {
 			return;
 		}
 
-		// Deep check for actual data beyond just an empty object structure
-
-		const hasMetrics = this.hasMetrics(metricsToSend);
-
-		if (!hasMetrics) {
+		if (!hasMetrics(metricsToSend)) {
 			console.debug('[Analytics Manager] No new analytics metrics to send (all zero/empty).');
 			return;
 		}
 
 		const payload = {
 			installation_id: localConfig.installation_id,
-			timestamp: new Date().toISOString(),
-			metrics: metricsToSend,
+			recorded_at: new Date().toISOString(),
+			app_version: getAppVersion(),
+			node_version: process.version,
+			os_platform: process.platform,
+			is_running_with_pm2: isRunningWithPM2(),
+			uptime_seconds_since_last_heartbeat: Math.floor((Date.now() - APP_START_TIME) / 1000),
+
+			// Flatten the metrics from metricsToSend directly into the payload
+			messages_analyzed_count: metricsToSend.messages_analyzed_count,
+			messages_relevant_count: metricsToSend.messages_relevant_count,
+			ai_provider_message_counts: metricsToSend.ai_provider_message_counts,
+			ai_api_latency_ms: metricsToSend.ai_api_latency_ms,
+			ai_api_success_counts: metricsToSend.ai_api_success_counts,
+			ai_api_failure_counts: metricsToSend.ai_api_failure_counts,
 		};
 
 		try {
@@ -425,6 +444,15 @@ export const analyticsManager = {
 	// Full persistence of metrics would require a separate mechanism if not sent frequently.
 };
 
+function hasMetrics(metricsToSend: AnalyticsMetrics): boolean {
+	return Object.values(metricsToSend).some(val =>
+		(typeof val === 'number' && val > 0) ||
+		(val && typeof val === 'object' && Object.keys(val).length > 0 &&
+			Object.values(val).some(nestedVal => typeof nestedVal === 'number' && nestedVal > 0)
+		)
+	);
+}
+
 // --- Graceful Shutdown for Final Metrics Sending ---
 // This needs to be outside the analyticsManager object as it's a global process event.
 process.on('beforeExit', async (code) => {
@@ -434,20 +462,31 @@ process.on('beforeExit', async (code) => {
 
 		const finalMetrics = analyticsManager.getAndResetMetrics();
 
-		const hasFinalMetrics = finalMetrics && analyticsManager.hasMetrics(finalMetrics);
-
-		if (hasFinalMetrics) {
+		if (finalMetrics && hasMetrics(finalMetrics)) {
 			const endpoint = ANALYTICS_API_ENDPOINT;
 			if (endpoint && localConfig.installation_id) {
+				const finalPayload = {
+					installation_id: localConfig.installation_id,
+					recorded_at: new Date().toISOString(),
+					app_version: getAppVersion(),
+					node_version: process.version,
+					os_platform: process.platform,
+					is_running_with_pm2: isRunningWithPM2(),
+					uptime_seconds_since_last_heartbeat: Math.floor((Date.now() - APP_START_TIME) / 1000),
+
+					messages_analyzed_count: finalMetrics.messages_analyzed_count,
+					messages_relevant_count: finalMetrics.messages_relevant_count,
+					ai_provider_message_counts: finalMetrics.ai_provider_message_counts,
+					ai_api_latency_ms: finalMetrics.ai_api_latency_ms,
+					ai_api_success_counts: finalMetrics.ai_api_success_counts,
+					ai_api_failure_counts: finalMetrics.ai_api_failure_counts,
+				};
+
 				try {
-					await axios.post(endpoint, {
-						installation_id: localConfig.installation_id,
-						timestamp: new Date().toISOString(),
-						metrics: finalMetrics,
-					}, {
+					await axios.post(endpoint, finalPayload, {
 						headers: {
 							'Content-Type': 'application/json',
-							'Authorization': `Bearer ${authToken}`, // Use the fetched token
+							'Authorization': `Bearer ${authToken}`,
 						}
 					});
 					console.info('[Analytics Manager] Final analytics metrics sent successfully on exit.');
