@@ -16,7 +16,11 @@ run_command_with_confirm() {
     echo "About to run: $cmd"
     read -p "$prompt (Y/n): " yn
     case $yn in
-        [Yy]* )
+        [Nn]*)
+            echo "Operation cancelled."
+            return 1 # Return 1 for cancellation
+            ;;
+        [Yy]*)
             # Try running command directly
             eval "$cmd"
             local status=$?
@@ -27,13 +31,16 @@ run_command_with_confirm() {
             fi
             return $status # Return the status of the command
             ;;
-        [Nn]* )
-            echo "Operation cancelled."
-            return 1 # Return 1 for cancellation
-            ;;
-        * )
-            echo "Please answer yes or no. Operation cancelled."
-            return 1 # Return 1 for invalid input
+        *)
+            # Default to yes if input is empty or unrecognized
+            eval "$cmd"
+            local status=$?
+            if [ $status -ne 0 ]; then
+                echo "Command failed without sudo. Trying with sudo..."
+                eval "sudo $cmd"
+                status=$?
+            fi
+            return $status # Return the status of the command
             ;;
     esac
 }
