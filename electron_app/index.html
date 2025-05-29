@@ -14,12 +14,45 @@
 			margin-top: 1em;
 			color: green;
 		}
+
+		form {
+			margin-top: 1em;
+		}
+
+		label {
+			display: block;
+			margin-bottom: 0.5em;
+		}
+
+		#save-status {
+			margin-left: 1em;
+		}
+
+		hr {
+			border: 0;
+			height: 1px;
+			background: #ccc;
+			margin: 2em 0;
+		}
 	</style>
 </head>
 
 <body>
 	<h1>WhatsApp AI Filter Bot (Electron)</h1>
 	<div id="status">Bot is running in the background.</div>
+	<hr />
+	<h2>Configuration</h2>
+	<form id="config-form">
+		<label>Perplexity API Key:<br><input type="password" id="perplexity-key" autocomplete="off" /></label><br>
+		<label>OpenAI API Key:<br><input type="password" id="openai-key" autocomplete="off" /></label><br>
+		<label>Interests (comma-separated keywords/topics):<br><input type="text" id="interests"
+				autocomplete="off" /></label><br>
+		<button type="submit">Save Settings</button>
+		<span id="save-status"></span>
+	</form>
+	<hr />
+	<h2>Notifications</h2>
+	<div id="notifications"></div>
 	<script src="renderer.js"></script>
 </body>
 
