@@ -35,6 +35,20 @@ export async function handleSelfChatCommand(msg: Message) {
 				} else {
 					return null;
 				}
+			} else if (getKey === 'commandchatid' || getKey === 'notificationchatid') {
+				const actualKey = Object.keys(userConfig).find(k => k.toLowerCase() === getKey);
+				const id = actualKey ? userConfig[actualKey] : undefined;
+				if (!id) return null;
+				const chat = await client.getChatById(id).catch(() => null);
+				if (!chat) return null;
+				if (chat.isGroup) {
+					return [{ id: chat.id._serialized, subject: chat.name }];
+				}
+				const contact = await client.getContactById(id).catch(() => null);
+				if (contact) {
+					return `@${contact.id.user}`;
+				}
+				throw new Error(`Chat with ID ${id} not found`);
 			}
 			// For other keys, just get the value
 			const actualKey = Object.keys(userConfig).find(k => k.toLowerCase() === getKey);
@@ -76,8 +90,6 @@ export async function handleSelfChatCommand(msg: Message) {
 					saveUserConfig();
 
 					// Fetch groups and show numbered list
-					const chat = await msg.getChat();
-					const client = (chat as any).client || (global as any).client; // fallback if needed
 					const chats = await client.getChats();
 					const groups = chats.filter((c: any) => c.isGroup);
 					if (!groups.length) {
@@ -171,6 +183,13 @@ export async function handleSelfChatCommand(msg: Message) {
 				if (typeof value === 'object' && (getKey === 'groupinclusionlist' || getKey === 'groupexclusionlist')) {
 					await msg.reply(`${actualKey}: ${value.map(group => `@${group.id}`).join(', ')}`, undefined, { groupMentions: value });
 				}
+				else if (getKey === 'commandchatid' || getKey === 'notificationchatid') {
+					if (Array.isArray(value)) {
+						await msg.reply(`${actualKey}: ${value.map(v => `@${v.id}`).join(', ')}`, undefined, { groupMentions: value });
+					} else if (typeof value === 'string') {
+						await msg.reply(`${actualKey}: ${value}`);
+					}
+				}
 				else if (Array.isArray(value)) {
 					msg.reply(`Value for "${actualKey}":\n\t${value.join(',\n\t')}`);
 				} else if (typeof value === 'object') {
@@ -195,10 +214,18 @@ export async function handleSelfChatCommand(msg: Message) {
 						const groups: { id: string, subject: string }[] = value;
 						response += `- ${key}: ${groups.map(g => `@${g.id}`).join(', ')}\n`;
 						options['groupMentions'] = groups;
+					} else if (value && (key === 'commandChatId' || key === 'notificationChatId')) {
+						if (typeof value === 'object') {
+							const groups: { id: string, subject: string }[] = value;
+							response += `- ${key}: ${groups.map(g => `@${g.id}`).join(', ')}\n`;
+							options['groupMentions']?.concat(groups);
+						} else {
+							response += `- ${key}: ${value}\n`;
+						}
 					} else if (value && typeof value === 'string') {
 						response += `- ${key}: ${value}\n`;
 					} else if (value) {
-						console.warn(`- ${key}: ${JSON.stringify(value)}`);
+						response += `- ${key}: ${JSON.stringify(value)}\n`;
 					} else {
 						response += `- ${key}: (no value)\n`;
 					}
