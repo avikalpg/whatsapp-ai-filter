@@ -32,7 +32,13 @@ export function loadUserConfig() {
 	if (fs.existsSync(USER_CONFIG_FILE)) {
 		try {
 			const data = fs.readFileSync(USER_CONFIG_FILE, 'utf8');
-			userConfig = JSON.parse(data);
+			const rawConfig = JSON.parse(data);
+			userConfig = {
+				processDirectMessages: rawConfig.processDirectMessages !== false,
+				groupInclusionList: rawConfig.groupInclusionList || [],
+				groupExclusionList: rawConfig.groupExclusionList || [],
+				...rawConfig
+			};
 			console.log('User configuration loaded from file.');
 		} catch (error) {
 			console.error('Error loading user configuration from file:', error);

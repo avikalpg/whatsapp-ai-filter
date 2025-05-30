@@ -147,7 +147,7 @@ export async function handleSelfChatCommand(msg: Message) {
 						userConfig[key] = interestsArray;
 						saveUserConfig();
 						await msg.reply(`Set "${key}" to: "${interestsArray.join(', ')}"`);
-					} else if (key === 'processdirectmessages') {
+					} else if (key.toLowerCase() === 'processdirectmessages') {
 						const boolVal = value.toLowerCase() === 'on' || value === 'true';
 						userConfig.processDirectMessages = boolVal;
 						saveUserConfig();
@@ -165,7 +165,7 @@ export async function handleSelfChatCommand(msg: Message) {
 			}
 			break;
 		}
-		case '!get':
+		case '!get': {
 			// Expecting format: !get <key>
 			if (parts.length < 2) {
 				await msg.reply('Usage: `!get <key>`');
@@ -201,8 +201,8 @@ export async function handleSelfChatCommand(msg: Message) {
 				msg.reply(`No value found for key: "${parts[1]}"`);
 			}
 			break;
-
-		case '!list':
+		}
+		case '!list': {
 			// List all keys and values
 			const configKeys = Object.keys(userConfig);
 			if (configKeys.length > 0) {
@@ -218,7 +218,7 @@ export async function handleSelfChatCommand(msg: Message) {
 						if (typeof value === 'object') {
 							const groups: { id: string, subject: string }[] = value;
 							response += `- ${key}: ${groups.map(g => `@${g.id}`).join(', ')}\n`;
-							options['groupMentions']?.concat(groups);
+							options.groupMentions = (options.groupMentions ?? []).concat(groups);
 						} else {
 							response += `- ${key}: ${value}\n`;
 						}
@@ -235,7 +235,7 @@ export async function handleSelfChatCommand(msg: Message) {
 				await msg.reply('No configurations set yet.');
 			}
 			break;
-
+		}
 		case '!help': {
 			const helpText = `*WhatsApp AI Filter Bot Commands:*
 
