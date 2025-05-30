@@ -159,26 +159,30 @@ echo ".env file created successfully. This file is ignored by Git."
 # Step 6: Initial WhatsApp Authentication (QR Code Scan)
 echo -e "\nStep 6/6: Initial WhatsApp Authentication (QR Code Scan)"
 
-SESSION_DIR="$CORE_DIR/.wwebjs_auth/session"
+LOG_SUCCESS="WhatsApp Web client is ready!"
 
-if [ ! -d "$SESSION_DIR" ]; then
-    echo "Starting the bot directly to display the WhatsApp QR code..."
-    ( node dist/index.js ) &
-    NODE_PID=$!
-    echo "Waiting for WhatsApp authentication... (Scan the QR code with your WhatsApp app)"
-    # Wait for the session directory to be created
-    while [ ! -d "$SESSION_DIR" ]; do
-        sleep 1
-    done
-    echo "Authentication detected! Killing temporary bot process..."
-    # Kill the whole process group (macOS/Linux)
-    kill -TERM -$NODE_PID 2>/dev/null
-    # Fallback: kill any node process running dist/index.js (in case any child remains)
-    pkill -f "node dist/index.js" 2>/dev/null
-    sleep 2 # Give it a moment to shut down
-else
-    echo "WhatsApp session already exists. Skipping QR code authentication."
-fi
+echo "Starting the bot directly to display the WhatsApp QR code..."
+# Use a named pipe (FIFO) for communication
+PIPE=$(mktemp -u)
+mkfifo "$PIPE"
+
+# Start the process, redirecting its output to the pipe
+node dist/index.js > "$PIPE" 2>&1 &
+NODE_PID=$!
+
+# Read from the pipe in the main shell
+while IFS= read -r line; do
+    echo "$line"
+    if [[ "$line" == *"$LOG_SUCCESS"* ]]; then
+        echo "Authentication detected! Killing temporary bot process..."
+        kill $NODE_PID
+        break
+    fi
+done < "$PIPE"
+
+# wait $NODE_PID 2>/dev/null
+rm "$PIPE"
+sleep 2
 
 echo -e "\nStarting Bot with PM2 and Configuring Autostart"
 
