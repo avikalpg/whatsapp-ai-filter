@@ -209,6 +209,30 @@ export async function handleSelfChatCommand(msg: Message) {
 			}
 			break;
 
+		case '!help': {
+			const helpText = `*WhatsApp AI Filter Bot Commands:*
+
+*General*
+\`!help\` - Show this help message
+\`!list\` - List all current configuration values
+\`!get <key>\` - Get the value for a config key (e.g. \`!get interests\`)
+
+*Set Preferences*
+\`!set interests=<your interests (comma separated)>\` - Set your interests (e.g. \`!set interests=AI, WhatsApp automation\`)
+\`!set processDirectMessages=on\`|\`off\` - Enable/disable direct message processing
+
+*Group Filtering*
+\`!set groups\` - Start interactive group inclusion/exclusion setup to choose which groups to include or exclude from processing
+
+*Command/Notification Chat*
+\`!set_command_chat\` - Set the current chat as the command channel
+\`!set_notification_chat\` - Set the current chat as the notification channel
+
+_You can always use !list to see your current settings._`;
+			await msg.reply(helpText);
+			break;
+		}
+
 		// !set_command_chat and !set_notification_chat commands are now handled directly in index.ts
 		default:
 			await msg.reply(`Unknown command: ${mainCommand}. Available commands: !set, !get, !list.
