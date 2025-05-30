@@ -15,6 +15,9 @@ export let userConfig: {
 	interests?: string[];
 	commandChatId?: string;     // New config key for command chat ID
 	notificationChatId?: string; // New config key for notification chat ID
+	processDirectMessages?: boolean; // Whether to process direct messages
+	groupInclusionList?: string[];   // List of group IDs to include
+	groupExclusionList?: string[];   // List of group IDs to exclude
 	[key: string]: any; // Allow other dynamic keys
 } = {};
 
