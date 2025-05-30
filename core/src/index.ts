@@ -105,6 +105,32 @@ async function main() {
 			return;
 		}
 
+		// --- NEW: Filtering logic for direct/group messages ---
+		const processDirectMessages = userConfig.processDirectMessages !== false; // default true
+		const groupInclusionList = userConfig.groupInclusionList || [];
+		const groupExclusionList = userConfig.groupExclusionList || [];
+
+		if (isActuallyGroup) {
+			// Group message
+			if (groupInclusionList.length > 0) {
+				if (!groupInclusionList.includes(actualChatId)) {
+					console.log(`Group ${actualChatId} not in inclusion list, skipping.`);
+					return;
+				}
+			} else if (groupExclusionList.length > 0) {
+				if (groupExclusionList.includes(actualChatId)) {
+					console.log(`Group ${actualChatId} is in exclusion list, skipping.`);
+					return;
+				}
+			}
+		} else {
+			// Direct message
+			if (!processDirectMessages) {
+				console.log('Direct message processing is disabled, skipping.');
+				return;
+			}
+		}
+
 		const analysisResult = await analyzeMessageWithLLM(msg.body)
 			.then((result) => {
 				analyticsManager.incrementMessagesAnalyzed();
