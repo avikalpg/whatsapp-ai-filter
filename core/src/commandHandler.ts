@@ -144,7 +144,7 @@ export async function handleSelfChatCommand(msg: Message) {
 				if (key) {
 					if (key.toLowerCase() === 'interests') {
 						const interestsArray = value.split(',').map(interest => interest.trim());
-						userConfig[key] = interestsArray;
+						userConfig.interests = interestsArray;
 						saveUserConfig();
 						await msg.reply(`Set "${key}" to: "${interestsArray.join(', ')}"`);
 					} else if (key.toLowerCase() === 'processdirectmessages') {
@@ -152,6 +152,10 @@ export async function handleSelfChatCommand(msg: Message) {
 						userConfig.processDirectMessages = boolVal;
 						saveUserConfig();
 						await msg.reply(`Set processDirectMessages to: ${boolVal ? 'ENABLED' : 'DISABLED'}`);
+					} else if (key.toLowerCase() in ['groupinclusionlist', 'groupexclusionlist']) {
+						await msg.reply('Use `!set groups` to configure group inclusion/exclusion lists interactively.');
+					} else if (key.toLowerCase() in ['commandChatId', 'notificationChatId']) {
+						await msg.reply(`To set ${key}, use the command in the desired chat: \`!set_command_chat\` or \`!set_notification_chat\`.`);
 					} else {
 						userConfig[key] = value;
 						saveUserConfig();
