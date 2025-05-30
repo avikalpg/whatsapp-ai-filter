@@ -165,9 +165,9 @@ export async function handleSelfChatCommand(msg: Message) {
 						userConfig.processDirectMessages = boolVal;
 						saveUserConfig();
 						await msg.reply(`Set processDirectMessages to: ${boolVal ? 'ENABLED' : 'DISABLED'}`);
-					} else if (key.toLowerCase() in ['groupinclusionlist', 'groupexclusionlist']) {
+					} else if (['groupinclusionlist', 'groupexclusionlist'].includes(key.toLowerCase())) {
 						await msg.reply('Use `!set groups` to configure group inclusion/exclusion lists interactively.');
-					} else if (key.toLowerCase() in ['commandChatId', 'notificationChatId']) {
+					} else if (['commandchatid', 'notificationchatid'].includes(key.toLowerCase())) {
 						await msg.reply(`To set ${key}, use the command in the desired chat: \`!set_command_chat\` or \`!set_notification_chat\`.`);
 					} else {
 						userConfig[key] = value;
