@@ -183,6 +183,10 @@ done < "$PIPE"
 # wait $NODE_PID 2>/dev/null
 rm "$PIPE"
 sleep 2
+if kill -0 $NODE_PID 2>/dev/null; then
+    echo "Process still running, force killing..."
+    kill -9 $NODE_PID 2>/dev/null
+fi
 
 echo -e "\nStarting Bot with PM2 and Configuring Autostart"
 
