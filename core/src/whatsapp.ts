@@ -51,6 +51,8 @@ client.on('ready', async () => {
 	const greetingMessage = `
 Hello! I'm your WhatsApp AI Filter bot.
 
+*Type \`!help\` at any time to see all available commands and features!*
+
 **Default Behavior:**
 * You can send **commands** to me in this chat (your self-chat) starting with an exclamation mark, e.g., \`!list\` or \`!set my_key=my_value\`.
 * I will send **relevant message notifications** back to this chat as well.
@@ -61,8 +63,8 @@ Hello! I'm your WhatsApp AI Filter bot.
 
 You can set these to the same chat (e.g., a dedicated group) or different ones. We recommend creating dedicated groups for each, which will just have you in them.
 
-Type \`!list\` to see your current settings.
-    `;
+Type \`!help\` to see all commands, or \`!list\` to see your current settings.
+	`;
 
 	// Send the greeting message to the user's self-chat
 	try {
@@ -77,12 +79,16 @@ Type \`!list\` to see your current settings.
 
 	const getStartedMessage = `
 **Getting Started:**
-Let's get you set up! Starting by setting up your interests. You can do this by sending me a message in this chat with the format \`!set interests=your_interests_here\`.
-You can set multiple interests by separating them with commas, e.g., \`!set interests=AI, WhatsApp\`.
+1. Set your *interests* (topics you care about):
+   Send a message like \`!set interests=AI, WhatsApp automation\`
+2. To control which groups are filtered, type \`!set groups\` and follow the interactive prompts.
+3. To enable or disable direct message processing, use \`!set processDirectMessages=on\` or \`off\`.
 
-Copy the below and paste it into this chat to get started:
+For a full list of features and setup options, type \`!help\`.
+
+*Copy and paste below to get started:*
 \`!set interests=AI, WhatsApp automation\`
-    `;
+	`;
 	try {
 		await client.sendMessage(myClientId, getStartedMessage.trim());
 		console.log('Get started message sent to self-chat.');
