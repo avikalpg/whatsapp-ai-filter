@@ -109,6 +109,18 @@ export async function handleSelfChatCommand(msg: Message) {
 						listMsg += `${i + 1}. ${g.name} (${g.id._serialized})\n`;
 					});
 					await msg.reply(listMsg.trim());
+
+					// Show current selection as numbers, if any
+					const currentList = wizard.mode === 'inclusion' ? userConfig.groupInclusionList : userConfig.groupExclusionList;
+					if (Array.isArray(currentList) && currentList.length > 0) {
+						const indices = currentList
+							.map(id => groups.findIndex((g: any) => g.id._serialized === id))
+							.filter(i => i >= 0)
+							.map(i => (i + 1).toString());
+						if (indices.length > 0) {
+							await msg.reply(`\nCurrent selection: ${indices.join(',')}`);
+						}
+					}
 					return;
 				}
 
