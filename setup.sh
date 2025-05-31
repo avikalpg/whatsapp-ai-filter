@@ -16,7 +16,11 @@ run_command_with_confirm() {
     echo "About to run: $cmd"
     read -p "$prompt (Y/n): " yn
     case $yn in
-        [Yy]* )
+        [Nn]*)
+            echo "Operation cancelled."
+            return 1 # Return 1 for cancellation
+            ;;
+        [Yy]*)
             # Try running command directly
             eval "$cmd"
             local status=$?
@@ -27,13 +31,16 @@ run_command_with_confirm() {
             fi
             return $status # Return the status of the command
             ;;
-        [Nn]* )
-            echo "Operation cancelled."
-            return 1 # Return 1 for cancellation
-            ;;
-        * )
-            echo "Please answer yes or no. Operation cancelled."
-            return 1 # Return 1 for invalid input
+        *)
+            # Default to yes if input is empty or unrecognized
+            eval "$cmd"
+            local status=$?
+            if [ $status -ne 0 ]; then
+                echo "Command failed without sudo. Trying with sudo..."
+                eval "sudo $cmd"
+                status=$?
+            fi
+            return $status # Return the status of the command
             ;;
     esac
 }
@@ -149,8 +156,39 @@ if [ $? -ne 0 ]; then
 fi
 echo ".env file created successfully. This file is ignored by Git."
 
-# Step 6: Start Bot with PM2 and Configure Autostart
-echo -e "\nStep 6/6: Starting Bot with PM2 and Configuring Autostart"
+# Step 6: Initial WhatsApp Authentication (QR Code Scan)
+echo -e "\nStep 6/6: Initial WhatsApp Authentication (QR Code Scan)"
+
+LOG_SUCCESS="WhatsApp Web client is ready!"
+
+echo "Starting the bot directly to display the WhatsApp QR code..."
+# Use a named pipe (FIFO) for communication
+PIPE=$(mktemp -u)
+mkfifo "$PIPE"
+
+# Start the process, redirecting its output to the pipe
+node dist/index.js > "$PIPE" 2>&1 &
+NODE_PID=$!
+
+# Read from the pipe in the main shell
+while IFS= read -r line; do
+    echo "$line"
+    if [[ "$line" == *"$LOG_SUCCESS"* ]]; then
+        echo "Authentication detected! Killing temporary bot process..."
+        kill $NODE_PID
+        break
+    fi
+done < "$PIPE"
+
+# wait $NODE_PID 2>/dev/null
+rm "$PIPE"
+sleep 2
+if kill -0 $NODE_PID 2>/dev/null; then
+    echo "Process still running, force killing..."
+    kill -9 $NODE_PID 2>/dev/null
+fi
+
+echo -e "\nStarting Bot with PM2 and Configuring Autostart"
 
 if run_command_with_confirm "pm2 start \"$ECOSYSTEM_CONFIG_FILE\"" "Ready to start the bot with PM2?"; then
     echo "${PM2_APP_NAME} started successfully with PM2."
