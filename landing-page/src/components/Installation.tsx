@@ -2,8 +2,14 @@
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useState } from 'react';
+import { LuCopy, LuCheck } from 'react-icons/lu';
 
 export default function Installation() {
+  const [copied, setCopied] = useState(false);
+
+  const installCommand = 'wget https://whatsapp-ai-filter.vercel.app/install.sh -O - | bash';
+
   const handleDownloadScript = () => {
     const link = document.createElement('a');
     link.href = '/install.sh';
@@ -17,6 +23,16 @@ export default function Installation() {
     window.location.href = '/guide';
   };
 
+  const handleCopyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(installCommand);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy command:', err);
+    }
+  };
+
   return (
     <section id="installation" className="py-16 px-8 bg-gray-50">
       <h2 className="text-2xl font-bold text-center" style={{ color: 'var(--secondary-color)' }}>Quick Installation</h2>
@@ -26,8 +42,17 @@ export default function Installation() {
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--secondary-color)' }}>Option 1: One-Command Installation</h3>
           <p className="text-gray-600 mb-4">Run this command in your terminal:</p>
-          <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm overflow-x-auto">
-            wget https://whatsapp-ai-filter.vercel.app/install.sh -O - | bash
+          <div className="relative">
+            <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm overflow-x-auto pr-12">
+              {installCommand}
+            </div>
+            <button
+              onClick={handleCopyCommand}
+              className="absolute top-2 right-2 h-8 w-8 p-0 flex items-center justify-center hover:bg-gray-800 rounded transition-colors duration-200"
+              title={copied ? 'Copied!' : 'Copy command'}
+            >
+              {copied ? <LuCheck className="text-green-400 w-4 h-4" /> : <LuCopy className="text-green-400 w-4 h-4"/>}
+            </button>
           </div>
         </div>
 
