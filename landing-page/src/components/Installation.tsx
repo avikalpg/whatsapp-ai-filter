@@ -5,25 +5,13 @@ import { Card } from "@/components/ui/card";
 import { useState } from 'react';
 import { LuCopy, LuCheck } from 'react-icons/lu';
 import { useRouter } from 'next/navigation';
+import { downloadInstallScript, navigateToGuide } from '@/utils/install';
 
 export default function Installation() {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
 
   const installCommand = 'wget https://whatsapp-ai-filter.vercel.app/install.sh -O - | bash';
-
-  const handleDownloadScript = () => {
-    const link = document.createElement('a');
-    link.href = '/install.sh';
-    link.download = 'install.sh';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleViewGuide = () => {
-    router.push('/guide');
-  };
 
   const handleCopyCommand = async () => {
     try {
@@ -62,7 +50,7 @@ export default function Installation() {
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--secondary-color)' }}>Option 2: Download Script</h3>
             <p className="text-gray-600 mb-4">Download the install script and run it manually:</p>
-            <Button variant="secondary" className="w-full" onClick={handleDownloadScript}>
+            <Button variant="secondary" className="w-full" onClick={downloadInstallScript}>
               Download install.sh
             </Button>
           </Card>
@@ -70,7 +58,7 @@ export default function Installation() {
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--secondary-color)' }}>Option 3: Manual Setup</h3>
             <p className="text-gray-600 mb-4">Clone the repository and run setup manually:</p>
-            <Button variant="secondary" className="w-full" onClick={handleViewGuide}>
+            <Button variant="secondary" className="w-full" onClick={() => navigateToGuide(router)}>
               View Setup Guide
             </Button>
           </Card>
