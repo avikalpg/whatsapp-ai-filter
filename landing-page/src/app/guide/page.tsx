@@ -1,11 +1,13 @@
 'use client'
 
-import Link from "next/link";
+import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
 export default function Guide() {
+  const router = useRouter();
+
   return (
     <div className="bg-gray-100 min-h-screen">
       <Header />
@@ -58,7 +60,7 @@ export default function Guide() {
       </section>
 
       <div className="text-center mt-12">
-        <Button variant="secondary" onClick={() => window.location.href = '/'}>
+        <Button variant="secondary" onClick={() => router.push('/')}>
           ← Back to Home
         </Button>
       </div>

@@ -1,8 +1,11 @@
 'use client';
 
 import { Button } from "@/components/ui/button";
+import { useRouter } from 'next/navigation';
 
 export default function Hero() {
+  const router = useRouter();
+
   const handleDownloadScript = () => {
     const link = document.createElement('a');
     link.href = '/install.sh';
@@ -13,7 +16,7 @@ export default function Hero() {
   };
 
   const handleViewGuide = () => {
-    window.location.href = '/guide';
+    router.push('/guide');
   };
 
   return (

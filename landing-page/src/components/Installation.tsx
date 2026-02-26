@@ -4,8 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useState } from 'react';
 import { LuCopy, LuCheck } from 'react-icons/lu';
+import { useRouter } from 'next/navigation';
 
 export default function Installation() {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
 
   const installCommand = 'wget https://whatsapp-ai-filter.vercel.app/install.sh -O - | bash';
@@ -20,7 +22,7 @@ export default function Installation() {
   };
 
   const handleViewGuide = () => {
-    window.location.href = '/guide';
+    router.push('/guide');
   };
 
   const handleCopyCommand = async () => {
