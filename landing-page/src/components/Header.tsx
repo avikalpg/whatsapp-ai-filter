@@ -1,8 +1,14 @@
+'use client'
+
 import { Button } from "@/components/ui/button";
 import Image from 'next/image';
 import Link from 'next/link';
 
 export default function Header() {
+  const handleTryNow = () => {
+    document.getElementById('installation')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
     <div className="flex items-center justify-between py-4 px-6 bg-white shadow-md">
       <div className="flex items-center">
@@ -14,9 +20,9 @@ export default function Header() {
           <img src="https://img.shields.io/github/stars/avikalpg/whatsapp-ai-filter?style=social" alt="GitHub stars" className="h-6" />
         </Link>
 
-        <Link href="#installation">
-          <Button className="!font-medium !text-md !h-8 !py-0">Try Now</Button>
-        </Link>
+        <Button className="!font-medium !text-md !h-8 !py-0" onClick={handleTryNow}>
+          Try Now
+        </Button>
       </div>
     </div>
   );
