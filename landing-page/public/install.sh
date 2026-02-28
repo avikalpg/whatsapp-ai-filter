@@ -52,6 +52,16 @@ check_requirements() {
     log_success "All requirements satisfied."
 }
 
+# Reattach STDIN to the terminal when running via pipe (e.g. wget ... | bash)
+if [ ! -t 0 ]; then
+    if [ -e /dev/tty ]; then
+        exec < /dev/tty
+    else
+        log_error "Interactive install requires a TTY (e.g. run Docker with -it). Download install.sh and run it locally instead."
+        exit 1
+    fi
+fi
+
 # Check if directory exists
 if [ -d "$REPO_DIR" ]; then
     log_warning "Directory $REPO_DIR already exists."
