@@ -11,7 +11,7 @@
   "dependencies": {
     "classnames": "^2.5.1",
     "jsonwebtoken": "^9.0.2",
-    "next": "15.3.2",
+    "next": "15.3.9",
     "pg": "^8.16.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
