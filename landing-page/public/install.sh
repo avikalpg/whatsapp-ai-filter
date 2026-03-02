@@ -62,6 +62,13 @@ if [ ! -t 0 ]; then
     fi
 fi
 
+# Start installation
+log_info "Starting WhatsApp AI Filter installation..."
+log_info "This will install the tool in the current directory."
+
+# Check requirements
+check_requirements
+
 # Check if directory exists
 if [ -d "$REPO_DIR" ]; then
     log_warning "Directory $REPO_DIR already exists."
@@ -75,13 +82,6 @@ if [ -d "$REPO_DIR" ]; then
         exit 1
     fi
 fi
-
-# Start installation
-log_info "Starting WhatsApp AI Filter installation..."
-log_info "This will install the tool in the current directory."
-
-# Check requirements
-check_requirements
 
 # Clone repository
 log_info "Cloning WhatsApp AI Filter repository..."
