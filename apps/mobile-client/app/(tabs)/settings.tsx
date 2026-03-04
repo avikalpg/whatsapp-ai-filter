@@ -26,6 +26,7 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
+    if (!token) return;
     try {
       const [status, filterList] = await Promise.all([getStatus(token), getFilters(token)]);
       setWaStatus(status);

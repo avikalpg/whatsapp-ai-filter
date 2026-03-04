@@ -62,6 +62,7 @@ export default function FeedScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(async (reset = false) => {
+    if (!token) return;
     try {
       const res = await getMessages(token, {
         filter_id: activeFilterId,
@@ -91,6 +92,7 @@ export default function FeedScreen() {
   }
 
   useEffect(() => {
+    if (!token) return;
     getFilters(token).then(setFilters).catch(console.error);
   }, [token]);
 

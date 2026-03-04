@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useAuthStore } from '../src/stores/auth';
 
@@ -22,10 +23,19 @@ function AuthGuard() {
 
 export default function RootLayout() {
   const loadAuth = useAuthStore((s) => s.loadAuth);
+  const isLoading = useAuthStore((s) => s.isLoading);
 
   useEffect(() => {
     loadAuth();
   }, []);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#25D366" />
+      </View>
+    );
+  }
 
   return (
     <>
