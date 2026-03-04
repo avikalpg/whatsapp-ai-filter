@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { pool } from '../db/index.js';
 
 const router = Router();
 router.use(requireAuth);
 
 router.get('/', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   const { filter_id, cursor, limit = '20' } = req.query as {
     filter_id?: string;
     cursor?: string;
@@ -62,7 +62,7 @@ router.get('/', async (req, res: Response): Promise<void> => {
 });
 
 router.patch('/:id/read', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   const { id } = req.params;
 
   try {

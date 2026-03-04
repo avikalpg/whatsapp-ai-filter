@@ -1,10 +1,13 @@
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import wwebjs from 'whatsapp-web.js';
+const { Client, LocalAuth } = wwebjs;
 import path from 'path';
 import { pool } from '../db/index.js';
 import { processIncomingMessage } from './messageProcessor.js';
 
+import type { Client as ClientType } from 'whatsapp-web.js';
+
 interface SessionEntry {
-  client: Client;
+  client: ClientType;
   status: 'linking' | 'ready' | 'disconnected';
 }
 
@@ -102,7 +105,7 @@ export async function initLinkSession(
   });
 }
 
-function attachMessageHandler(userId: string, client: Client): void {
+function attachMessageHandler(userId: string, client: ClientType): void {
   client.on('message_create', async (msg) => {
     // Only handle incoming messages (not our own sends)
     if (msg.fromMe) return;

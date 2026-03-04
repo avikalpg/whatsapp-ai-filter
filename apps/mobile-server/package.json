@@ -6,9 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "NODE_ENV=development tsx watch src/index.ts",
-    "migrate": "tsx src/db/migrate.ts"
+    "start": "npm run build && node dist/index.js",
+    "dev": "NODE_ENV=development tsx watch src/index.ts"
   },
   "dependencies": {
     "axios": "^1.9.0",

@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { pool } from '../db/index.js';
 
 const router = Router();
@@ -12,7 +12,7 @@ interface GroupRuleInput {
 }
 
 router.get('/', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   try {
     const filtersResult = await pool.query(
       `SELECT id, name, prompt, category, include_dms, is_active, is_preset, created_at
@@ -52,7 +52,7 @@ router.get('/', async (req, res: Response): Promise<void> => {
 });
 
 router.post('/', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   const { name, prompt, category = 'all', include_dms = true, group_rules = [] } =
     req.body as {
       name?: string;
@@ -104,7 +104,7 @@ router.post('/', async (req, res: Response): Promise<void> => {
 });
 
 router.patch('/:id', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   const { id } = req.params;
 
   const ownership = await pool.query(
@@ -180,7 +180,7 @@ router.patch('/:id', async (req, res: Response): Promise<void> => {
 });
 
 router.delete('/:id', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   const { id } = req.params;
 
   try {

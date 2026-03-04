@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import {
   initLinkSession,
   destroySession,
@@ -11,7 +11,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get('/status', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   try {
     const result = await pool.query(
       `SELECT status, phone_number, linked_at FROM whatsapp_sessions WHERE user_id = $1`,
@@ -30,7 +30,7 @@ router.get('/status', async (req, res: Response): Promise<void> => {
 });
 
 router.post('/init-link', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   const { phone_number } = req.body as { phone_number?: string };
 
   if (!phone_number) {
@@ -55,7 +55,7 @@ router.post('/init-link', async (req, res: Response): Promise<void> => {
 });
 
 router.delete('/unlink', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   try {
     await destroySession(userId);
     res.json({ success: true });
@@ -66,7 +66,7 @@ router.delete('/unlink', async (req, res: Response): Promise<void> => {
 });
 
 router.get('/groups', async (req, res: Response): Promise<void> => {
-  const userId = (req as AuthRequest).userId;
+  const userId = req.userId;
   try {
     const groups = await getGroups(userId);
     res.json(groups);
