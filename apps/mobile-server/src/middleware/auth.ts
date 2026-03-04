@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 declare global {
   namespace Express {
     interface Request {
-      userId: string;
+      userId?: string;
     }
   }
 }
@@ -18,9 +18,15 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    res.status(500).json({ error: 'Server misconfiguration' });
+    return;
+  }
+
   const token = header.slice(7);
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    const payload = jwt.verify(token, secret) as { userId: string };
     req.userId = payload.userId;
     next();
   } catch {

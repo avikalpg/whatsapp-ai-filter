@@ -103,15 +103,25 @@ export async function initLinkSession(
   return new Promise((resolve, reject) => {
     let settled = false;
 
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        client.destroy().catch(() => {});
+        linkingSessions.delete(sessionId);
+        reject(new Error('WhatsApp linking timed out after 2 minutes'));
+      }
+    }, 120_000);
+
     client.on('qr', async () => {
       try {
         const code: string = await client.requestPairingCode(phoneNumber);
         if (!settled) {
           settled = true;
+          clearTimeout(timeoutId);
           resolve(code);
         }
       } catch (err) {
-        if (!settled) { settled = true; reject(err); }
+        if (!settled) { settled = true; clearTimeout(timeoutId); reject(err); }
       }
     });
 
@@ -136,11 +146,11 @@ export async function initLinkSession(
     client.on('auth_failure', async () => {
       await updateDbStatus(userId, 'disconnected');
       linkingSessions.delete(sessionId);
-      if (!settled) { settled = true; reject(new Error('WhatsApp authentication failed')); }
+      if (!settled) { settled = true; clearTimeout(timeoutId); reject(new Error('WhatsApp authentication failed')); }
     });
 
     client.initialize().catch((err) => {
-      if (!settled) { settled = true; reject(err); }
+      if (!settled) { settled = true; clearTimeout(timeoutId); reject(err); }
     });
   });
 }
@@ -148,6 +158,11 @@ export async function initLinkSession(
 /** Returns the linking session status + userId when ready, or null if not found. */
 export function getLinkingSession(sessionId: string): LinkingEntry | null {
   return linkingSessions.get(sessionId) ?? null;
+}
+
+/** Removes a linking session after a token has been issued to prevent repeated minting. */
+export function consumeLinkingSession(sessionId: string): void {
+  linkingSessions.delete(sessionId);
 }
 
 function attachMessageHandler(userId: string, client: ClientType): void {
@@ -214,8 +229,15 @@ export async function restoreActiveSessions(): Promise<void> {
       sessions.delete(userId);
     });
 
+    client.on('auth_failure', async () => {
+      console.error(`[SessionManager] Auth failure restoring session for user ${userId}`);
+      await updateDbStatus(userId, 'disconnected');
+      sessions.delete(userId);
+    });
+
     client.initialize().catch((err) => {
       console.error(`[SessionManager] Failed to restore session for ${userId}:`, err);
+      updateDbStatus(userId, 'disconnected').catch(() => {});
       sessions.delete(userId);
     });
   }

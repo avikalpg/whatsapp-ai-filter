@@ -45,6 +45,7 @@ export default function LinkWhatsAppScreen() {
   }
 
   function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
     setStep('waiting');
     pollRef.current = setInterval(async () => {
       try {
@@ -54,7 +55,14 @@ export default function LinkWhatsAppScreen() {
           await setAuth(res.token, res.user);
           router.replace('/(tabs)/feed');
         }
-      } catch { /* retry on next tick */ }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          Alert.alert('Session expired', 'The pairing session expired. Please try again.');
+          setStep('input');
+        }
+        // Other errors: retry on next tick
+      }
     }, 3000);
   }
 

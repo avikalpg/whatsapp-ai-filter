@@ -36,7 +36,7 @@ export async function analyzeMessageWithPerplexity(prompt: string): Promise<Perp
           },
         },
       },
-      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` } }
+      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, timeout: 15000 }
     );
     return response.data;
   } catch (err: any) {

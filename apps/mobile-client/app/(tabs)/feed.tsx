@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   RefreshControl, ActivityIndicator, ScrollView,
@@ -60,15 +60,18 @@ export default function FeedScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadSeqRef = useRef(0);
 
   const load = useCallback(async (reset = false) => {
     if (!token) return;
+    const seq = ++loadSeqRef.current;
     try {
       const res = await getMessages(token, {
         filter_id: activeFilterId,
         cursor: reset ? undefined : (cursor ?? undefined),
         limit: 20,
       });
+      if (seq !== loadSeqRef.current) return; // discard stale response
       setMatches((prev) => reset ? res.matches : [...prev, ...res.matches]);
       setCursor(res.next_cursor);
       setHasMore(res.next_cursor !== null);

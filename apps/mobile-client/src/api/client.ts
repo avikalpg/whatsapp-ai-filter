@@ -1,4 +1,4 @@
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
 
 type RequestOptions = {
   method?: string;
@@ -17,6 +17,9 @@ export class ApiError extends Error {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  if (!API_URL) {
+    throw new ApiError(0, 'EXPO_PUBLIC_API_URL is not set. Add it to your .env file.');
+  }
   const { method = 'GET', body, token } = options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

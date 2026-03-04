@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import {
   initLinkSession,
   getLinkingSession,
+  consumeLinkingSession,
   destroySession,
   getGroups,
 } from '../services/sessionManager.js';
@@ -32,9 +33,9 @@ router.post('/init-link', async (req: Request, res: Response): Promise<void> => 
   try {
     const code = await initLinkSession(digits, sessionId);
     res.json({ session_id: sessionId, code, expires_in_seconds: 60 });
-  } catch (err: any) {
+  } catch (err) {
     console.error('POST /whatsapp/init-link error:', err);
-    res.status(500).json({ error: err.message ?? 'Failed to initiate WhatsApp link' });
+    res.status(500).json({ error: 'Failed to initiate WhatsApp link' });
   }
 });
 
@@ -57,7 +58,9 @@ router.get('/link-status', async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-  // Issue JWT
+  // Issue JWT — consume the session so repeated calls can't mint fresh tokens
+  consumeLinkingSession(session_id);
+
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     res.status(500).json({ error: 'Server misconfiguration' });
@@ -97,7 +100,7 @@ router.get('/status', requireAuth, async (req, res: Response): Promise<void> => 
 
 router.delete('/unlink', requireAuth, async (req, res: Response): Promise<void> => {
   try {
-    await destroySession(req.userId);
+    await destroySession(req.userId!);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /whatsapp/unlink error:', err);
@@ -107,7 +110,7 @@ router.delete('/unlink', requireAuth, async (req, res: Response): Promise<void> 
 
 router.get('/groups', requireAuth, async (req, res: Response): Promise<void> => {
   try {
-    const groups = await getGroups(req.userId);
+    const groups = await getGroups(req.userId!);
     res.json(groups);
   } catch (err: any) {
     const msg = err.message ?? 'Failed to fetch groups';

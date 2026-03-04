@@ -11,8 +11,8 @@ This document is the persistent product and engineering roadmap for the WhatsApp
 - **`apps/mobile-client/`** — Expo (managed) React Native app.
 
 ### Features
-- Email + password registration and login (JWT, 30-day expiry)
-- Three preset filters seeded on registration: *Action Items*, *Follow-ups*, *Events in San Francisco*
+- WhatsApp-as-identity: phone number pairing code flow issues a JWT (30-day expiry) — no email/password
+- Three preset filters seeded on first link: *Action Items*, *Follow-ups*, *Events in San Francisco*
 - Create custom named filters with a prompt, category (personal/work/all), DM toggle, and optional group-scoping rules
 - Link WhatsApp via phone number → 8-character pairing code flow
 - Feed screen: all filter matches, most recent first, full message content shown inline

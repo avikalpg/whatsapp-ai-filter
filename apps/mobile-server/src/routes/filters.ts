@@ -11,6 +11,17 @@ interface GroupRuleInput {
   rule_type: 'include' | 'exclude';
 }
 
+function isValidGroupRules(rules: unknown): rules is GroupRuleInput[] {
+  if (!Array.isArray(rules)) return false;
+  return rules.every(
+    (r) =>
+      r &&
+      typeof r.group_id === 'string' && r.group_id.trim() &&
+      typeof r.group_name === 'string' && r.group_name.trim() &&
+      (r.rule_type === 'include' || r.rule_type === 'exclude')
+  );
+}
+
 router.get('/', async (req, res: Response): Promise<void> => {
   const userId = req.userId;
   try {
@@ -67,6 +78,11 @@ router.post('/', async (req, res: Response): Promise<void> => {
     return;
   }
 
+  if (!isValidGroupRules(group_rules)) {
+    res.status(400).json({ error: 'group_rules contains invalid entries' });
+    return;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -107,15 +123,6 @@ router.patch('/:id', async (req, res: Response): Promise<void> => {
   const userId = req.userId;
   const { id } = req.params;
 
-  const ownership = await pool.query(
-    'SELECT id FROM filters WHERE id = $1 AND user_id = $2',
-    [id, userId]
-  );
-  if (ownership.rows.length === 0) {
-    res.status(404).json({ error: 'Filter not found' });
-    return;
-  }
-
   const { name, prompt, category, include_dms, is_active, group_rules } =
     req.body as Partial<{
       name: string;
@@ -126,9 +133,24 @@ router.patch('/:id', async (req, res: Response): Promise<void> => {
       group_rules: GroupRuleInput[];
     }>;
 
+  if (group_rules !== undefined && !isValidGroupRules(group_rules)) {
+    res.status(400).json({ error: 'group_rules contains invalid entries' });
+    return;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    const ownership = await client.query(
+      'SELECT id FROM filters WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+    if (ownership.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Filter not found' });
+      return;
+    }
 
     const updates: string[] = [];
     const values: unknown[] = [];

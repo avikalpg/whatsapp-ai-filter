@@ -19,7 +19,7 @@ export async function analyzeMessageWithOpenAi(prompt: string): Promise<OpenAiRe
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
       },
-      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` } }
+      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, timeout: 15000 }
     );
     return response.data;
   } catch (err: any) {
