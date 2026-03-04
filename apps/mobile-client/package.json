@@ -11,6 +11,7 @@
   "dependencies": {
     "@expo/vector-icons": "~14.0.4",
     "expo": "~52.0.0",
+    "expo-asset": "~11.0.5",
     "expo-constants": "~17.0.3",
     "expo-linking": "~7.0.3",
     "expo-router": "~4.0.14",
