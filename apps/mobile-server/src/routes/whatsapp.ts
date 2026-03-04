@@ -1,20 +1,81 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
+import jwt from 'jsonwebtoken';
 import { requireAuth } from '../middleware/auth.js';
 import {
   initLinkSession,
+  getLinkingSession,
   destroySession,
   getGroups,
 } from '../services/sessionManager.js';
 import { pool } from '../db/index.js';
 
 const router = Router();
-router.use(requireAuth);
 
-router.get('/status', async (req, res: Response): Promise<void> => {
+// ── Unauthenticated: linking flow ─────────────────────────────────────────────
+
+router.post('/init-link', async (req: Request, res: Response): Promise<void> => {
+  const { phone_number } = req.body as { phone_number?: string };
+
+  if (!phone_number) {
+    res.status(400).json({ error: 'phone_number is required' });
+    return;
+  }
+
+  const digits = phone_number.replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 15) {
+    res.status(400).json({ error: 'Invalid phone number. Include country code, digits only (e.g. 14155551234).' });
+    return;
+  }
+
+  const sessionId = randomUUID();
+  try {
+    const code = await initLinkSession(digits, sessionId);
+    res.json({ session_id: sessionId, code, expires_in_seconds: 60 });
+  } catch (err: any) {
+    console.error('POST /whatsapp/init-link error:', err);
+    res.status(500).json({ error: err.message ?? 'Failed to initiate WhatsApp link' });
+  }
+});
+
+router.get('/link-status', async (req: Request, res: Response): Promise<void> => {
+  const { session_id } = req.query as { session_id?: string };
+
+  if (!session_id) {
+    res.status(400).json({ error: 'session_id is required' });
+    return;
+  }
+
+  const session = getLinkingSession(session_id);
+  if (!session) {
+    res.status(404).json({ error: 'Session not found or expired' });
+    return;
+  }
+
+  if (session.status !== 'ready' || !session.userId) {
+    res.json({ status: 'pending' });
+    return;
+  }
+
+  // Issue JWT
+  const token = jwt.sign({ userId: session.userId }, process.env.JWT_SECRET!, { expiresIn: '30d' });
+  res.json({
+    status: 'ready',
+    token,
+    user: { id: session.userId, phone_number: session.phoneNumber },
+  });
+});
+
+// ── Authenticated ─────────────────────────────────────────────────────────────
+
+router.get('/status', requireAuth, async (req, res: Response): Promise<void> => {
   const userId = req.userId;
   try {
     const result = await pool.query(
-      `SELECT status, phone_number, linked_at FROM whatsapp_sessions WHERE user_id = $1`,
+      `SELECT ws.status, u.phone_number, ws.linked_at
+       FROM whatsapp_sessions ws
+       JOIN users u ON u.id = ws.user_id
+       WHERE ws.user_id = $1`,
       [userId]
     );
     if (result.rows.length === 0) {
@@ -29,35 +90,9 @@ router.get('/status', async (req, res: Response): Promise<void> => {
   }
 });
 
-router.post('/init-link', async (req, res: Response): Promise<void> => {
-  const userId = req.userId;
-  const { phone_number } = req.body as { phone_number?: string };
-
-  if (!phone_number) {
-    res.status(400).json({ error: 'phone_number is required' });
-    return;
-  }
-
-  // Strip non-digits and ensure starts with country code
-  const digits = phone_number.replace(/\D/g, '');
-  if (digits.length < 10 || digits.length > 15) {
-    res.status(400).json({ error: 'Invalid phone number format. Include country code (e.g. 14155551234).' });
-    return;
-  }
-
+router.delete('/unlink', requireAuth, async (req, res: Response): Promise<void> => {
   try {
-    const code = await initLinkSession(userId, digits);
-    res.json({ code, expires_in_seconds: 60 });
-  } catch (err: any) {
-    console.error('POST /whatsapp/init-link error:', err);
-    res.status(500).json({ error: err.message ?? 'Failed to initiate WhatsApp link' });
-  }
-});
-
-router.delete('/unlink', async (req, res: Response): Promise<void> => {
-  const userId = req.userId;
-  try {
-    await destroySession(userId);
+    await destroySession(req.userId);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /whatsapp/unlink error:', err);
@@ -65,10 +100,9 @@ router.delete('/unlink', async (req, res: Response): Promise<void> => {
   }
 });
 
-router.get('/groups', async (req, res: Response): Promise<void> => {
-  const userId = req.userId;
+router.get('/groups', requireAuth, async (req, res: Response): Promise<void> => {
   try {
-    const groups = await getGroups(userId);
+    const groups = await getGroups(req.userId);
     res.json(groups);
   } catch (err: any) {
     const msg = err.message ?? 'Failed to fetch groups';

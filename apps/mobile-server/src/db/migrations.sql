@@ -3,10 +3,13 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
+  phone_number TEXT UNIQUE NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- v2 migration: drop email/password columns if upgrading from old schema
+ALTER TABLE users DROP COLUMN IF EXISTS email;
+ALTER TABLE users DROP COLUMN IF EXISTS password_hash;
 
 CREATE TABLE IF NOT EXISTS filters (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -5,17 +5,19 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../src/stores/auth';
-import { initLink, getStatus } from '../src/api/whatsapp';
+import { initLink, getLinkStatus } from '../src/api/whatsapp';
 import { ApiError } from '../src/api/client';
 
 type Step = 'input' | 'code' | 'waiting';
 
 export default function LinkWhatsAppScreen() {
-  const token = useAuthStore((s) => s.token)!;
+  const setAuth = useAuthStore((s) => s.setAuth);
   const router = useRouter();
+
   const [step, setStep] = useState<Step>('input');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [sessionId, setSessionId] = useState('');
   const [loading, setLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -25,18 +27,18 @@ export default function LinkWhatsAppScreen() {
 
   async function handleGenerateCode() {
     const digits = phone.replace(/\D/g, '');
-    if (digits.length < 10) {
+    if (digits.length < 7) {
       Alert.alert('Invalid number', 'Enter your phone number with country code (e.g. 14155551234).');
       return;
     }
     setLoading(true);
     try {
-      const res = await initLink(token, digits);
+      const res = await initLink(digits);
       setCode(res.code);
+      setSessionId(res.session_id);
       setStep('code');
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Failed to generate code';
-      Alert.alert('Error', msg);
+      Alert.alert('Error', err instanceof ApiError ? err.message : 'Failed to generate code');
     } finally {
       setLoading(false);
     }
@@ -46,20 +48,24 @@ export default function LinkWhatsAppScreen() {
     setStep('waiting');
     pollRef.current = setInterval(async () => {
       try {
-        const status = await getStatus(token);
-        if (status.status === 'ready') {
+        const res = await getLinkStatus(sessionId);
+        if (res.status === 'ready' && res.token && res.user) {
           if (pollRef.current) clearInterval(pollRef.current);
+          await setAuth(res.token, res.user);
           router.replace('/(tabs)/feed');
         }
-      } catch { /* retry */ }
+      } catch { /* retry on next tick */ }
     }, 3000);
   }
 
   if (step === 'input') {
     return (
       <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.appName}>WACI</Text>
         <Text style={styles.heading}>Link your WhatsApp</Text>
-        <Text style={styles.body}>Enter your phone number including country code. We'll generate a pairing code to enter in WhatsApp.</Text>
+        <Text style={styles.body}>
+          Enter your phone number with country code. We'll generate a pairing code — no password needed.
+        </Text>
 
         <TextInput
           style={styles.input}
@@ -70,8 +76,14 @@ export default function LinkWhatsAppScreen() {
           autoFocus
         />
 
-        <TouchableOpacity style={[styles.button, loading && styles.buttonDisabled]} onPress={handleGenerateCode} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Generate Code</Text>}
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleGenerateCode}
+          disabled={loading}
+        >
+          {loading
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.buttonText}>Get Pairing Code</Text>}
         </TouchableOpacity>
       </ScrollView>
     );
@@ -101,7 +113,6 @@ export default function LinkWhatsAppScreen() {
     );
   }
 
-  // waiting
   return (
     <View style={styles.center}>
       <ActivityIndicator size="large" color="#25D366" />
@@ -112,17 +123,18 @@ export default function LinkWhatsAppScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, padding: 24, backgroundColor: '#fff' },
+  container: { flexGrow: 1, padding: 28, backgroundColor: '#fff', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', gap: 16 },
-  heading: { fontSize: 22, fontWeight: '700', marginBottom: 10, color: '#111' },
-  body: { fontSize: 15, color: '#666', lineHeight: 22, marginBottom: 24 },
+  appName: { fontSize: 32, fontWeight: '800', color: '#25D366', textAlign: 'center', marginBottom: 4, letterSpacing: 2 },
+  heading: { fontSize: 22, fontWeight: '700', marginBottom: 10, color: '#111', textAlign: 'center' },
+  body: { fontSize: 15, color: '#666', lineHeight: 22, marginBottom: 28, textAlign: 'center' },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 14, fontSize: 18, marginBottom: 16, backgroundColor: '#fafafa', letterSpacing: 1 },
   button: { backgroundColor: '#25D366', borderRadius: 10, padding: 15, alignItems: 'center' },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   codeBox: { backgroundColor: '#f0fdf4', borderWidth: 2, borderColor: '#25D366', borderRadius: 14, padding: 24, alignItems: 'center', marginVertical: 24 },
   codeText: { fontSize: 36, fontWeight: '800', letterSpacing: 6, color: '#1a7d45', fontFamily: 'monospace' },
-  instructions: { fontSize: 15, lineHeight: 26, color: '#444', marginBottom: 28, backgroundColor: '#f9f9f9', padding: 16, borderRadius: 10 },
+  instructions: { fontSize: 15, lineHeight: 28, color: '#444', marginBottom: 28, backgroundColor: '#f9f9f9', padding: 16, borderRadius: 10 },
   waitingText: { fontSize: 17, fontWeight: '600', color: '#111' },
   waitingHint: { fontSize: 14, color: '#888' },
 });

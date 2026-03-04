@@ -4,9 +4,9 @@ import * as SecureStore from 'expo-secure-store';
 const TOKEN_KEY = 'waaifil_token';
 const USER_KEY = 'waaifil_user';
 
-interface User {
+export interface User {
   id: string;
-  email: string;
+  phone_number: string;
 }
 
 interface AuthState {

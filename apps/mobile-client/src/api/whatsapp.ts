@@ -11,12 +11,26 @@ export interface Group {
   name: string;
 }
 
-export function getStatus(token: string): Promise<WhatsAppStatus> {
-  return request<WhatsAppStatus>('/api/whatsapp/status', { token });
+export interface LinkStatusResponse {
+  status: 'pending' | 'ready';
+  token?: string;
+  user?: { id: string; phone_number: string };
 }
 
-export function initLink(token: string, phone_number: string): Promise<{ code: string; expires_in_seconds: number }> {
-  return request('/api/whatsapp/init-link', { method: 'POST', body: { phone_number }, token });
+/** No token required — starts the WhatsApp pairing flow */
+export function initLink(
+  phone_number: string
+): Promise<{ session_id: string; code: string; expires_in_seconds: number }> {
+  return request('/api/whatsapp/init-link', { method: 'POST', body: { phone_number } });
+}
+
+/** Poll until status === 'ready', then extract token + user */
+export function getLinkStatus(session_id: string): Promise<LinkStatusResponse> {
+  return request<LinkStatusResponse>(`/api/whatsapp/link-status?session_id=${encodeURIComponent(session_id)}`);
+}
+
+export function getStatus(token: string): Promise<WhatsAppStatus> {
+  return request<WhatsAppStatus>('/api/whatsapp/status', { token });
 }
 
 export function unlink(token: string): Promise<{ success: boolean }> {

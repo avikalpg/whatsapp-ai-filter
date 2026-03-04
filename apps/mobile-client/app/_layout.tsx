@@ -9,10 +9,10 @@ function AuthGuard() {
 
   useEffect(() => {
     if (isLoading) return;
-    const inAuthGroup = segments[0] === '(auth)';
-    if (!token && !inAuthGroup) {
-      router.replace('/(auth)/login');
-    } else if (token && inAuthGroup) {
+    const onLinkScreen = segments[0] === 'link-whatsapp';
+    if (!token && !onLinkScreen) {
+      router.replace('/link-whatsapp');
+    } else if (token && onLinkScreen) {
       router.replace('/(tabs)/feed');
     }
   }, [token, isLoading, segments]);
@@ -31,9 +31,8 @@ export default function RootLayout() {
     <>
       <AuthGuard />
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="link-whatsapp" options={{ headerShown: true, title: 'Link WhatsApp', presentation: 'modal' }} />
+        <Stack.Screen name="link-whatsapp" options={{ headerShown: false }} />
         <Stack.Screen name="filters/new" options={{ headerShown: true, title: 'New Filter', presentation: 'modal' }} />
         <Stack.Screen name="filters/[id]" options={{ headerShown: true, title: 'Edit Filter', presentation: 'modal' }} />
       </Stack>
