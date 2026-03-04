@@ -55,8 +55,8 @@ async function findOrCreateUser(phoneNumber: string): Promise<string> {
     );
     const userId = result.rows[0].id;
     await client.query(
-      'INSERT INTO whatsapp_sessions (user_id) VALUES ($1)',
-      [userId]
+      'INSERT INTO whatsapp_sessions (user_id, phone_number) VALUES ($1, $2)',
+      [userId, phoneNumber]
     );
     for (const preset of PRESET_FILTERS) {
       await client.query(
@@ -83,12 +83,15 @@ export async function initLinkSession(
   phoneNumber: string,
   sessionId: string
 ): Promise<string> {
-  // Mark as pending immediately so polling can start
+  // Resolve userId BEFORE creating the client so LocalAuth uses userId as clientId,
+  // matching restoreActiveSessions and surviving server restarts.
+  const userId = await findOrCreateUser(phoneNumber);
+  await updateDbStatus(userId, 'linking');
   linkingSessions.set(sessionId, { phoneNumber, status: 'pending' });
 
   const client = new Client({
     authStrategy: new LocalAuth({
-      clientId: sessionId,
+      clientId: userId,
       dataPath: path.resolve(SESSION_DIR),
     }),
     puppeteer: {
@@ -114,28 +117,24 @@ export async function initLinkSession(
 
     client.on('ready', async () => {
       try {
-        const userId = await findOrCreateUser(phoneNumber);
-        // Move to established sessions map
         sessions.set(userId, { client, status: 'ready' });
         linkingSessions.set(sessionId, { phoneNumber, status: 'ready', userId });
         await updateDbStatus(userId, 'ready', { linked_at: new Date() });
         console.log(`[SessionManager] User ${userId} (${phoneNumber}) ready`);
         attachMessageHandler(userId, client);
       } catch (err) {
-        console.error('[SessionManager] Error creating user on ready:', err);
+        console.error('[SessionManager] Error on ready:', err);
       }
     });
 
     client.on('disconnected', async () => {
-      const entry = linkingSessions.get(sessionId);
-      if (entry?.userId) {
-        await updateDbStatus(entry.userId, 'disconnected');
-        sessions.delete(entry.userId);
-      }
+      await updateDbStatus(userId, 'disconnected');
+      sessions.delete(userId);
       linkingSessions.delete(sessionId);
     });
 
     client.on('auth_failure', async () => {
+      await updateDbStatus(userId, 'disconnected');
       linkingSessions.delete(sessionId);
       if (!settled) { settled = true; reject(new Error('WhatsApp authentication failed')); }
     });

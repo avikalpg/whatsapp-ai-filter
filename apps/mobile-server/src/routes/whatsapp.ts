@@ -17,7 +17,7 @@ const router = Router();
 router.post('/init-link', async (req: Request, res: Response): Promise<void> => {
   const { phone_number } = req.body as { phone_number?: string };
 
-  if (!phone_number) {
+  if (typeof phone_number !== 'string' || !phone_number.trim()) {
     res.status(400).json({ error: 'phone_number is required' });
     return;
   }
@@ -58,7 +58,12 @@ router.get('/link-status', async (req: Request, res: Response): Promise<void> =>
   }
 
   // Issue JWT
-  const token = jwt.sign({ userId: session.userId }, process.env.JWT_SECRET!, { expiresIn: '30d' });
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    res.status(500).json({ error: 'Server misconfiguration' });
+    return;
+  }
+  const token = jwt.sign({ userId: session.userId }, secret, { expiresIn: '30d' });
   res.json({
     status: 'ready',
     token,
