@@ -1,17 +1,22 @@
--- mobile-server database schema
+-- WACI mobile-server schema
+-- Safe to re-run: drops all tables and recreates from scratch.
+-- No user data is preserved on migration.
+
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TABLE IF NOT EXISTS users (
+DROP TABLE IF EXISTS filter_matches CASCADE;
+DROP TABLE IF EXISTS filter_group_rules CASCADE;
+DROP TABLE IF EXISTS filters CASCADE;
+DROP TABLE IF EXISTS whatsapp_sessions CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   phone_number TEXT UNIQUE NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- v2 migration: drop email/password columns if upgrading from old schema
-ALTER TABLE users DROP COLUMN IF EXISTS email;
-ALTER TABLE users DROP COLUMN IF EXISTS password_hash;
-
-CREATE TABLE IF NOT EXISTS filters (
+CREATE TABLE filters (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -23,7 +28,7 @@ CREATE TABLE IF NOT EXISTS filters (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS filter_group_rules (
+CREATE TABLE filter_group_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   filter_id UUID NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
   group_id TEXT NOT NULL,
@@ -32,9 +37,9 @@ CREATE TABLE IF NOT EXISTS filter_group_rules (
   UNIQUE (filter_id, group_id)
 );
 
-CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+CREATE TABLE whatsapp_sessions (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  phone_number TEXT,
+  phone_number TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'unlinked'
     CHECK (status IN ('unlinked', 'linking', 'ready', 'disconnected')),
   linked_at TIMESTAMPTZ,
@@ -42,7 +47,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_sessions (
 );
 
 -- Message content stored plaintext for MVP; E2E encryption planned (see roadmap)
-CREATE TABLE IF NOT EXISTS filter_matches (
+CREATE TABLE filter_matches (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   filter_id UUID NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
@@ -58,4 +63,4 @@ CREATE TABLE IF NOT EXISTS filter_matches (
   is_read BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX IF NOT EXISTS idx_filter_matches_user ON filter_matches(user_id, received_at DESC);
+CREATE INDEX idx_filter_matches_user ON filter_matches(user_id, received_at DESC);
