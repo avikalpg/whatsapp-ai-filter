@@ -6,22 +6,27 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import type { Filter, FilterMatch, SyncResult } from '../native/wabridge';
 import * as WaBridge from '../native/wabridge';
+import { registerDevice } from '../api/chat';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const LAST_SYNC_KEY = 'waci_last_sync_ts';
 const DB_PATH_KEY = 'waci_db_path';
+const DEVICE_ID_KEY = 'waci_device_id';
+const SERVER_URL = 'https://whatsapp-ai-filter.vercel.app';
 
 // ── State types ──────────────────────────────────────────────────────────────
 
-export type AppScreen = 'splash' | 'setup-api-key' | 'link-whatsapp' | 'inbox';
+export type AppScreen = 'splash' | 'link-whatsapp' | 'inbox';
 
 interface AppState {
   // Setup
   isInitialized: boolean;
-  claudeApiKey: string | null;
+  authToken: string | null;
+  trialExpiresAt: string | null;
   isLinked: boolean;
   pairingCode: string | null;
 
@@ -43,7 +48,6 @@ interface AppState {
 
   // Actions
   initialize: () => Promise<void>;
-  saveApiKey: (key: string) => Promise<void>;
   startPairing: (phoneNumber: string) => Promise<void>;
   refreshLinkedStatus: () => Promise<void>;
   loadFilters: () => Promise<void>;
@@ -59,7 +63,8 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   isInitialized: false,
-  claudeApiKey: null,
+  authToken: null,
+  trialExpiresAt: null,
   isLinked: false,
   pairingCode: null,
   filters: [],
@@ -75,41 +80,45 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   initialize: async () => {
     try {
-      const apiKey = await SecureStore.getItemAsync('claude_api_key');
-      const lastSync = await AsyncStorage.getItem(LAST_SYNC_KEY);
-      const dbPath = await AsyncStorage.getItem(DB_PATH_KEY);
-
-      const resolvedDbPath = dbPath ?? getDefaultDbPath();
-      await AsyncStorage.setItem(DB_PATH_KEY, resolvedDbPath);
-
-      if (apiKey) {
-        await WaBridge.initBridge(resolvedDbPath, apiKey);
-        const linked = await WaBridge.isLinked();
-        set({
-          claudeApiKey: apiKey,
-          isLinked: linked,
-          lastSyncTimestamp: lastSync ? parseInt(lastSync, 10) : 0,
-          isInitialized: true,
-        });
-      } else {
-        set({ isInitialized: true });
+      // Get or create a stable device ID
+      let deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+      if (!deviceId) {
+        deviceId = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          Math.random().toString() + Date.now().toString()
+        );
+        await SecureStore.setItemAsync(DEVICE_ID_KEY, deviceId);
       }
+
+      // Get or create auth token from backend
+      let authToken = await SecureStore.getItemAsync('waci_auth_token');
+      let trialExpiresAt = await AsyncStorage.getItem('waci_trial_expires_at');
+
+      if (!authToken) {
+        const reg = await registerDevice(deviceId, SERVER_URL);
+        authToken = reg.token;
+        trialExpiresAt = reg.trial_expires_at;
+        await SecureStore.setItemAsync('waci_auth_token', authToken);
+        await AsyncStorage.setItem('waci_trial_expires_at', trialExpiresAt);
+      }
+
+      const lastSync = await AsyncStorage.getItem(LAST_SYNC_KEY);
+      const dbPath = await AsyncStorage.getItem(DB_PATH_KEY) ?? getDefaultDbPath();
+      await AsyncStorage.setItem(DB_PATH_KEY, dbPath);
+
+      // Init bridge with auth token (used for Claude calls)
+      await WaBridge.initBridge(dbPath, authToken);
+      const linked = await WaBridge.isLinked();
+
+      set({
+        authToken,
+        trialExpiresAt,
+        isLinked: linked,
+        lastSyncTimestamp: lastSync ? parseInt(lastSync, 10) : 0,
+        isInitialized: true,
+      });
     } catch (e: unknown) {
       set({ error: String(e), isInitialized: true });
-    }
-  },
-
-  // ── saveApiKey ─────────────────────────────────────────────────────────
-
-  saveApiKey: async (key: string) => {
-    try {
-      await SecureStore.setItemAsync('claude_api_key', key);
-      const dbPath = (await AsyncStorage.getItem(DB_PATH_KEY)) ?? getDefaultDbPath();
-      await WaBridge.initBridge(dbPath, key);
-      const linked = await WaBridge.isLinked();
-      set({ claudeApiKey: key, isLinked: linked });
-    } catch (e: unknown) {
-      set({ error: String(e) });
     }
   },
 
@@ -224,7 +233,5 @@ export const useAppStore = create<AppState>((set, get) => ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {
-  // React Native FileSystem.documentDirectory is set at runtime; use a placeholder
-  // that the native module resolves to the app's Documents directory.
   return 'waci.db';
 }
