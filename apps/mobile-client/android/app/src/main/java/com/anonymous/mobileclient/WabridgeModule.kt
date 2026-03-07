@@ -8,12 +8,8 @@ import wabridge.Wabridge
 /**
  * WabridgeModule — React Native NativeModule that wraps the Go wabridge .aar.
  *
- * The wabridge.aar is built from packages/wabridge/ via:
- *   ./scripts/build-wabridge-android.sh
- * and placed at:
- *   apps/mobile-client/android/app/libs/wabridge.aar
- *
- * Until the .aar is present, any call will throw a descriptive error.
+ * The wabridge.aar is compiled via gomobile bind from packages/wabridge/.
+ * Gomobile-generated Java API throws exceptions instead of using error output params.
  */
 class WabridgeModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -27,10 +23,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun initBridge(dbPath: String, authToken: String, promise: Promise) {
         runOnBackground(promise) {
-            val err = StringBuilder()
-            val b = Wabridge.newBridge(dbPath, authToken, err)
-                ?: throw RuntimeException("Failed to init bridge: $err")
-            bridge = b
+            bridge = Bridge(dbPath, authToken)
             null // resolve with null (void)
         }
     }
@@ -40,10 +33,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun startPairing(phoneNumber: String, promise: Promise) {
         runOnBackground(promise) {
-            val b = requireBridge()
-            val err = StringBuilder()
-            val code = b.startPairing(phoneNumber, err)
-            if (code.isNullOrEmpty()) throw RuntimeException("Pairing failed: $err")
+            val code = requireBridge().startPairing(phoneNumber)
             code
         }
     }
@@ -65,12 +55,12 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
             val b = requireBridge()
             val callback = object : MessageCallback {
                 override fun onMessage(jsonPayload: String) {
-                    // Emit to JS via event emitter (optional; JS polls getMatches)
+                    // Emit to JS via event emitter (optional; JS can poll getMatches)
                 }
             }
             val result = b.syncAndTriage(lastSyncTimestamp.toLong(), callback)
             val map = Arguments.createMap()
-            map.putInt("messagesSynced", result.messagesSynced)
+            map.putInt("messagesSynced", result.messagesSynced.toInt())
             map.putString("error", result.error ?: "")
             map
         }
@@ -81,10 +71,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun getFilters(promise: Promise) {
         runOnBackground(promise) {
-            val err = StringBuilder()
-            val json = requireBridge().getFilters(err)
-            if (json.isNullOrEmpty()) throw RuntimeException("getFilters failed: $err")
-            json
+            requireBridge().getFilters()
         }
     }
 
@@ -93,10 +80,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun saveFilter(filterJson: String, promise: Promise) {
         runOnBackground(promise) {
-            val err = StringBuilder()
-            val json = requireBridge().saveFilter(filterJson, err)
-            if (json.isNullOrEmpty()) throw RuntimeException("saveFilter failed: $err")
-            json
+            requireBridge().saveFilter(filterJson)
         }
     }
 
@@ -105,8 +89,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun deleteFilter(id: String, promise: Promise) {
         runOnBackground(promise) {
-            val err = StringBuilder()
-            requireBridge().deleteFilter(id, err)
+            requireBridge().deleteFilter(id)
             null
         }
     }
@@ -116,10 +99,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun getMatches(filterId: String, limit: Int, promise: Promise) {
         runOnBackground(promise) {
-            val err = StringBuilder()
-            val json = requireBridge().getMatches(filterId, limit.toLong(), err)
-            if (json.isNullOrEmpty()) throw RuntimeException("getMatches failed: $err")
-            json
+            requireBridge().getMatches(filterId, limit.toLong())
         }
     }
 
@@ -128,8 +108,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun unlink(promise: Promise) {
         runOnBackground(promise) {
-            val err = StringBuilder()
-            requireBridge().unlink(err)
+            requireBridge().unlink()
             bridge = null
             null
         }
@@ -144,7 +123,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
 
     /**
      * Runs [block] on a background thread and resolves/rejects [promise].
-     * Returns the resolved value (WritableMap, String, Boolean, null for void).
+     * Gomobile-generated methods throw exceptions on error.
      */
     private fun runOnBackground(promise: Promise, block: () -> Any?) {
         Thread {
@@ -156,6 +135,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
                     is String -> promise.resolve(result)
                     is Boolean -> promise.resolve(result)
                     is Int -> promise.resolve(result)
+                    is Double -> promise.resolve(result)
                     else -> promise.resolve(result.toString())
                 }
             } catch (e: Exception) {
