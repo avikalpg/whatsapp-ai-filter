@@ -153,7 +153,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 		return len(collected), fmt.Errorf("failed to load filters: %w", err)
 	}
 
-	triage := NewTriageClient(claudeApiKey)
+	triage := NewTriageClient(claudeApiKey, "")
 
 	for _, msg := range collected {
 		for _, f := range filters {

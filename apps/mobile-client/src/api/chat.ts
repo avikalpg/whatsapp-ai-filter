@@ -4,7 +4,8 @@
  * The backend holds the Anthropic API key; the app only stores a JWT.
  */
 
-const DEFAULT_SERVER_URL = 'https://whatsapp-ai-filter.vercel.app';
+const DEFAULT_SERVER_URL =
+  process.env.EXPO_PUBLIC_API_URL ?? 'https://whatsapp-ai-filter.vercel.app';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -62,6 +63,18 @@ export async function registerDevice(
     throw new Error(`Registration failed: ${res.status}`);
   }
 
+  return res.json();
+}
+
+export async function activateTrial(
+  authToken: string,
+  serverUrl: string = DEFAULT_SERVER_URL
+): Promise<{ trial_expires_at: string }> {
+  const res = await fetch(`${serverUrl}/api/auth/activate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!res.ok) throw new Error(`Activation failed: ${res.status}`);
   return res.json();
 }
 

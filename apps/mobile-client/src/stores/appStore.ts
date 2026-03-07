@@ -9,14 +9,15 @@ import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import type { Filter, FilterMatch, SyncResult } from '../native/wabridge';
 import * as WaBridge from '../native/wabridge';
-import { registerDevice } from '../api/chat';
+import { registerDevice, activateTrial } from '../api/chat';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const LAST_SYNC_KEY = 'waci_last_sync_ts';
 const DB_PATH_KEY = 'waci_db_path';
 const DEVICE_ID_KEY = 'waci_device_id';
-const SERVER_URL = 'https://whatsapp-ai-filter.vercel.app';
+const SERVER_URL =
+  process.env.EXPO_PUBLIC_API_URL ?? 'https://whatsapp-ai-filter.vercel.app';
 
 // ── State types ──────────────────────────────────────────────────────────────
 
@@ -128,6 +129,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const code = await WaBridge.startPairing(phoneNumber);
       set({ pairingCode: code });
+    } catch (e: unknown) {
+      set({ error: String(e) });
+    }
+  },
+
+  // ── confirmLinked ──────────────────────────────────────────────────────
+  // Called after the user confirms the pairing code was entered in WhatsApp.
+
+  confirmLinked: async () => {
+    try {
+      const linked = await WaBridge.isLinked();
+      if (linked) {
+        const { authToken } = get();
+        if (authToken) {
+          const { trial_expires_at } = await activateTrial(authToken, SERVER_URL);
+          await AsyncStorage.setItem('waci_trial_expires_at', trial_expires_at);
+          set({ isLinked: true, trialExpiresAt: trial_expires_at });
+        }
+      }
     } catch (e: unknown) {
       set({ error: String(e) });
     }
