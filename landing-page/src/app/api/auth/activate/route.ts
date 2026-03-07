@@ -5,8 +5,8 @@ import { extractToken, verifyToken } from '@/lib/auth';
 /**
  * POST /api/auth/activate
  *
- * Called by the mobile app once WhatsApp linking succeeds.
- * Starts the 24-hour free trial clock.
+ * Called by the mobile app once WhatsApp linking succeeds (pairing code confirmed).
+ * Sets whatsapp_linked = TRUE and starts the 24-hour free trial clock.
  * Idempotent — if already activated, returns the existing expiry.
  */
 export async function POST(req: NextRequest) {
@@ -30,10 +30,12 @@ export async function POST(req: NextRequest) {
 
   const result = await db.query<{ trial_expires_at: string }>(
     `UPDATE mobile_users
-     SET trial_expires_at = CASE
-       WHEN trial_expires_at IS NULL THEN NOW() + INTERVAL '24 hours'
-       ELSE trial_expires_at
-     END
+     SET
+       whatsapp_linked = TRUE,
+       trial_expires_at = CASE
+         WHEN trial_expires_at IS NULL THEN NOW() + INTERVAL '24 hours'
+         ELSE trial_expires_at
+       END
      WHERE id = $1
      RETURNING trial_expires_at`,
     [payload.userId]

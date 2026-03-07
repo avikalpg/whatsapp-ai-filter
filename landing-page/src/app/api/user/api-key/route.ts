@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { extractToken, verifyToken, encryptApiKey } from '@/lib/auth';
 
-export async function POST(req: NextRequest) {
+async function authenticate(req: NextRequest): Promise<{ userId: string } | NextResponse> {
   const rawToken = extractToken(req);
   if (!rawToken) {
     return NextResponse.json(
@@ -10,18 +10,31 @@ export async function POST(req: NextRequest) {
       { status: 401 }
     );
   }
-
-  let payload: { userId: string };
   try {
-    payload = verifyToken(rawToken);
+    return verifyToken(rawToken);
   } catch {
     return NextResponse.json(
       { error: 'Invalid or expired token', code: 'UNAUTHORIZED' },
       { status: 401 }
     );
   }
+}
 
-  const { api_key } = await req.json();
+export async function POST(req: NextRequest) {
+  const auth = await authenticate(req);
+  if (auth instanceof NextResponse) return auth;
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid JSON body', code: 'BAD_REQUEST' },
+      { status: 400 }
+    );
+  }
+
+  const { api_key } = body as { api_key?: unknown };
 
   if (!api_key || typeof api_key !== 'string' || !api_key.startsWith('sk-ant-')) {
     return NextResponse.json(
@@ -31,38 +44,36 @@ export async function POST(req: NextRequest) {
   }
 
   const encrypted = encryptApiKey(api_key);
-
-  await db.query(
+  const result = await db.query(
     'UPDATE mobile_users SET custom_api_key = $1 WHERE id = $2',
-    [encrypted, payload.userId]
+    [encrypted, auth.userId]
   );
+
+  if (result.rowCount === 0) {
+    return NextResponse.json(
+      { error: 'User not found', code: 'NOT_FOUND' },
+      { status: 404 }
+    );
+  }
 
   return NextResponse.json({ success: true });
 }
 
 export async function DELETE(req: NextRequest) {
-  const rawToken = extractToken(req);
-  if (!rawToken) {
-    return NextResponse.json(
-      { error: 'Missing auth token', code: 'UNAUTHORIZED' },
-      { status: 401 }
-    );
-  }
+  const auth = await authenticate(req);
+  if (auth instanceof NextResponse) return auth;
 
-  let payload: { userId: string };
-  try {
-    payload = verifyToken(rawToken);
-  } catch {
-    return NextResponse.json(
-      { error: 'Invalid or expired token', code: 'UNAUTHORIZED' },
-      { status: 401 }
-    );
-  }
-
-  await db.query(
+  const result = await db.query(
     'UPDATE mobile_users SET custom_api_key = NULL WHERE id = $1',
-    [payload.userId]
+    [auth.userId]
   );
+
+  if (result.rowCount === 0) {
+    return NextResponse.json(
+      { error: 'User not found', code: 'NOT_FOUND' },
+      { status: 404 }
+    );
+  }
 
   return NextResponse.json({ success: true });
 }
