@@ -50,6 +50,7 @@ interface AppState {
   // Actions
   initialize: () => Promise<void>;
   startPairing: (phoneNumber: string) => Promise<void>;
+  confirmLinked: () => Promise<void>;
   refreshLinkedStatus: () => Promise<void>;
   loadFilters: () => Promise<void>;
   saveFilter: (filter: Omit<Filter, 'id' | 'created_at' | 'updated_at'> & { id?: string }) => Promise<void>;
