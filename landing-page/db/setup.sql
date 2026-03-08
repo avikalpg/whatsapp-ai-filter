@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES mobile_users(id) ON DELETE CASCADE,
     tokens_used INTEGER NOT NULL DEFAULT 0,
+    cost_usd NUMERIC(10, 8) NOT NULL DEFAULT 0, -- estimated USD cost for this request
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

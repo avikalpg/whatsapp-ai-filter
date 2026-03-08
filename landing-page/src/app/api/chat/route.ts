@@ -6,9 +6,36 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_TIMEOUT_MS = 15_000;
 
-// Cap output tokens for trial users (shared API key) to limit spend.
-// No model restriction — client can use any Claude model during the trial.
+// Cap output tokens for trial users to prevent a single request burning too much.
 const TRIAL_MAX_TOKENS = 1024;
+
+// Dollar budget for the 24h trial period. Override via TRIAL_BUDGET_USD env var.
+// Checked against cumulative spend in usage_logs before each trial request.
+const TRIAL_BUDGET_USD = parseFloat(process.env.TRIAL_BUDGET_USD ?? '5.0');
+
+// Anthropic pricing: USD per million tokens (input / output).
+// Source: https://www.anthropic.com/pricing — update as pricing changes.
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-opus-4-5':                  { input: 15.00, output: 75.00 },
+  'claude-opus-4-latest':             { input: 15.00, output: 75.00 },
+  'claude-sonnet-4-5':                { input:  3.00, output: 15.00 },
+  'claude-3-7-sonnet-latest':         { input:  3.00, output: 15.00 },
+  'claude-3-5-sonnet-latest':         { input:  3.00, output: 15.00 },
+  'claude-3-5-haiku-latest':          { input:  0.80, output:  4.00 },
+  'claude-haiku-3-5-latest':          { input:  0.80, output:  4.00 },
+  'claude-3-haiku-20240307':          { input:  0.25, output:  1.25 },
+};
+// Conservative fallback for unknown/future models — price as Opus
+const FALLBACK_PRICING = { input: 15.00, output: 75.00 };
+
+function estimateCostUsd(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const pricing = MODEL_PRICING[model] ?? FALLBACK_PRICING;
+  return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+}
 
 export async function POST(req: NextRequest) {
   // Authenticate
@@ -62,6 +89,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // For trial users: check cumulative spend against dollar budget
+  if (!hasCustomKey) {
+    const spendResult = await db.query<{ total: string }>(
+      'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_logs WHERE user_id = $1',
+      [user.id]
+    );
+    const spentUsd = parseFloat(spendResult.rows[0]?.total ?? '0');
+    if (spentUsd >= TRIAL_BUDGET_USD) {
+      return NextResponse.json(
+        {
+          error: `Trial budget of $${TRIAL_BUDGET_USD.toFixed(2)} reached. Add your own Claude API key to continue.`,
+          code: 'TRIAL_BUDGET_EXHAUSTED',
+        },
+        { status: 402 }
+      );
+    }
+  }
+
   // Determine which API key to use
   const apiKey = hasCustomKey
     ? decryptApiKey(user.custom_api_key!)
@@ -93,8 +138,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Cap max_tokens for trial users to limit spend on the shared API key.
-  // Custom-key users are uncapped (they pay their own bill).
+  // Cap max_tokens for trial users on the shared API key.
   if (!hasCustomKey) {
     const requested = typeof body.max_tokens === 'number' ? body.max_tokens : TRIAL_MAX_TOKENS;
     body = { ...body, max_tokens: Math.min(requested, TRIAL_MAX_TOKENS) };
@@ -135,16 +179,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Log token usage (fire-and-forget)
-  const tokensUsed =
-    ((data as { usage?: { input_tokens?: number } })?.usage?.input_tokens ?? 0) +
-    ((data as { usage?: { output_tokens?: number } })?.usage?.output_tokens ?? 0);
+  // Log cost + token usage (fire-and-forget)
+  const usage = (data as { usage?: { input_tokens?: number; output_tokens?: number } })?.usage;
+  const inputTokens = usage?.input_tokens ?? 0;
+  const outputTokens = usage?.output_tokens ?? 0;
+  const model = typeof body.model === 'string' ? body.model : 'unknown';
+  const costUsd = estimateCostUsd(model, inputTokens, outputTokens);
 
-  if (tokensUsed > 0) {
-    db.query('INSERT INTO usage_logs (user_id, tokens_used) VALUES ($1, $2)', [
-      user.id,
-      tokensUsed,
-    ]).catch((err: unknown) => console.error('[usage_log]', err));
+  if (inputTokens + outputTokens > 0) {
+    db.query(
+      'INSERT INTO usage_logs (user_id, tokens_used, cost_usd) VALUES ($1, $2, $3)',
+      [user.id, inputTokens + outputTokens, costUsd]
+    ).catch((err: unknown) => console.error('[usage_log]', err));
   }
 
   return NextResponse.json(data, { status: anthropicRes.status });
