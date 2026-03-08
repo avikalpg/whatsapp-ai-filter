@@ -38,8 +38,12 @@ export async function callClaude(
   const data: AnthropicResponse = await res.json();
 
   if (!res.ok) {
+    // Use specific error codes so callers can show the right message
     if (res.status === 402) {
-      throw new Error('TRIAL_EXPIRED');
+      throw new Error(data.code ?? 'TRIAL_EXPIRED'); // TRIAL_EXPIRED | TRIAL_BUDGET_EXHAUSTED
+    }
+    if (res.status === 401) {
+      throw new Error('UNAUTHORIZED');
     }
     throw new Error(data.error ?? `API error ${res.status}`);
   }
@@ -49,18 +53,48 @@ export async function callClaude(
   return text;
 }
 
+/**
+ * Register a new device. Returns JWT on success.
+ * If device is already registered (409), calls reissueToken automatically.
+ */
 export async function registerDevice(
   deviceId: string,
   serverUrl: string = DEFAULT_SERVER_URL
-): Promise<{ token: string; trial_expires_at: string }> {
+): Promise<{ token: string }> {
   const res = await fetch(`${serverUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ device_id: deviceId }),
   });
 
+  if (res.status === 409) {
+    // Already registered — re-issue token using device_id as credential
+    return reissueToken(deviceId, serverUrl);
+  }
+
   if (!res.ok) {
     throw new Error(`Registration failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Re-issue a JWT for an existing device.
+ * Call when: 401 received (token expired) or app reinstalled (token lost).
+ */
+export async function reissueToken(
+  deviceId: string,
+  serverUrl: string = DEFAULT_SERVER_URL
+): Promise<{ token: string }> {
+  const res = await fetch(`${serverUrl}/api/auth/reissue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Token reissue failed: ${res.status}`);
   }
 
   return res.json();

@@ -9,7 +9,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import type { Filter, FilterMatch, SyncResult } from '../native/wabridge';
 import * as WaBridge from '../native/wabridge';
-import { registerDevice, activateTrial } from '../api/chat';
+import { registerDevice, reissueToken, activateTrial } from '../api/chat';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -57,6 +57,7 @@ interface AppState {
   loadMatches: (filterId: string, limit?: number) => Promise<void>;
   syncAndTriage: () => Promise<void>;
   unlink: () => Promise<void>;
+  refreshToken: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -93,14 +94,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // Get or create auth token from backend
       let authToken = await SecureStore.getItemAsync('waci_auth_token');
-      let trialExpiresAt = await AsyncStorage.getItem('waci_trial_expires_at');
+      const trialExpiresAt = await AsyncStorage.getItem('waci_trial_expires_at');
 
       if (!authToken) {
+        // First install — register device (reissues automatically if already registered)
         const reg = await registerDevice(deviceId, SERVER_URL);
         authToken = reg.token;
-        trialExpiresAt = reg.trial_expires_at;
         await SecureStore.setItemAsync('waci_auth_token', authToken);
-        await AsyncStorage.setItem('waci_trial_expires_at', trialExpiresAt);
       }
 
       const lastSync = await AsyncStorage.getItem(LAST_SYNC_KEY);
@@ -242,6 +242,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await WaBridge.unlink();
       set({ isLinked: false, pairingCode: null });
+    } catch (e: unknown) {
+      set({ error: String(e) });
+    }
+  },
+
+  // ── refreshToken ───────────────────────────────────────────────────────
+  // Called when a 401 UNAUTHORIZED is received — re-issues JWT using
+  // device_id as the long-lived credential (stored in SecureStore).
+
+  refreshToken: async () => {
+    try {
+      const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+      if (!deviceId) throw new Error('Device ID missing — reinstall required');
+      const { token } = await reissueToken(deviceId, SERVER_URL);
+      await SecureStore.setItemAsync('waci_auth_token', token);
+      set({ authToken: token });
     } catch (e: unknown) {
       set({ error: String(e) });
     }
