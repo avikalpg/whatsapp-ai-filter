@@ -6,14 +6,8 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_TIMEOUT_MS = 15_000;
 
-// Server-side constraints applied to trial (shared API key) requests.
-// Prevents a modified client from choosing expensive models or large token budgets.
-const TRIAL_ALLOWED_MODELS = new Set([
-  'claude-haiku-3-5-latest',
-  'claude-3-5-haiku-latest',
-  'claude-3-haiku-20240307',
-]);
-const TRIAL_DEFAULT_MODEL = 'claude-3-5-haiku-latest';
+// Cap output tokens for trial users (shared API key) to limit spend.
+// No model restriction — client can use any Claude model during the trial.
 const TRIAL_MAX_TOKENS = 1024;
 
 export async function POST(req: NextRequest) {
@@ -84,14 +78,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Apply server-side constraints for trial users (shared API key)
+  // Cap max_tokens for trial users to limit spend on the shared API key.
+  // Custom-key users are uncapped (they pay their own bill).
   if (!hasCustomKey) {
-    const requestedModel = typeof body.model === 'string' ? body.model : '';
-    if (!TRIAL_ALLOWED_MODELS.has(requestedModel)) {
-      body = { ...body, model: TRIAL_DEFAULT_MODEL };
-    }
-    const requestedTokens = typeof body.max_tokens === 'number' ? body.max_tokens : TRIAL_MAX_TOKENS;
-    body = { ...body, max_tokens: Math.min(requestedTokens, TRIAL_MAX_TOKENS) };
+    const requested = typeof body.max_tokens === 'number' ? body.max_tokens : TRIAL_MAX_TOKENS;
+    body = { ...body, max_tokens: Math.min(requested, TRIAL_MAX_TOKENS) };
   }
 
   // Forward to Anthropic with timeout
