@@ -27,11 +27,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return NextResponse.json(
+      { error: 'Invalid JSON body', code: 'BAD_REQUEST' },
+      { status: 400 }
+    );
+  }
+
   const { device_id } = body as { device_id?: unknown };
 
-  if (!device_id || typeof device_id !== 'string' || device_id.length < 8 || device_id.length > 255) {
+  // device_id is the sole credential on this route — enforce exact format:
+  // SHA-256 hex digest = exactly 64 lowercase hex characters
+  if (
+    !device_id ||
+    typeof device_id !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(device_id)
+  ) {
     return NextResponse.json(
-      { error: 'Invalid device_id', code: 'INVALID_DEVICE_ID' },
+      { error: 'Invalid device_id: must be a 64-character hex string', code: 'INVALID_DEVICE_ID' },
       { status: 400 }
     );
   }

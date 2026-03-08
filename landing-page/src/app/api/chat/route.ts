@@ -65,12 +65,27 @@ export async function POST(req: NextRequest) {
   // Determine which API key to use
   const apiKey = hasCustomKey
     ? decryptApiKey(user.custom_api_key!)
-    : process.env.ANTHROPIC_API_KEY!;
+    : process.env.ANTHROPIC_API_KEY;
 
-  // Parse request body
+  if (!apiKey) {
+    console.error('[/api/chat] ANTHROPIC_API_KEY is not set');
+    return NextResponse.json(
+      { error: 'Server misconfiguration', code: 'SERVER_ERROR' },
+      { status: 500 }
+    );
+  }
+
+  // Parse request body — must be a plain object (not null, array, or primitive)
   let body: Record<string, unknown>;
   try {
-    body = await req.json() as Record<string, unknown>;
+    const parsed: unknown = await req.json();
+    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object', code: 'BAD_REQUEST' },
+        { status: 400 }
+      );
+    }
+    body = parsed as Record<string, unknown>;
   } catch {
     return NextResponse.json(
       { error: 'Invalid JSON body', code: 'BAD_REQUEST' },
