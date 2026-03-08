@@ -33,5 +33,29 @@ CREATE TABLE IF NOT EXISTS analytics (
 );
 
 -- Recommended Indexes for faster querying:
-CREATE INDEX idx_analytics_installation_id ON analytics (installation_id);
-CREATE INDEX idx_analytics_recorded_at ON analytics (recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analytics_installation_id ON analytics (installation_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_recorded_at ON analytics (recorded_at DESC);
+
+-- Mobile app user accounts
+CREATE TABLE IF NOT EXISTS mobile_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trial_expires_at TIMESTAMPTZ, -- set to NOW()+24h when WhatsApp linking completes
+    whatsapp_linked BOOLEAN NOT NULL DEFAULT FALSE, -- set true after pairing confirmed
+    custom_api_key TEXT -- AES-256 encrypted, nullable
+);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_users_device_id ON mobile_users (device_id);
+
+-- Token usage tracking
+CREATE TABLE IF NOT EXISTS usage_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES mobile_users(id) ON DELETE CASCADE,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    cost_usd NUMERIC(10, 8) NOT NULL DEFAULT 0, -- estimated USD cost for this request
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs (user_id);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs (created_at DESC);
