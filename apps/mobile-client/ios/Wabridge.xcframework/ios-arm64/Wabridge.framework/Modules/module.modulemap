@@ -1,8 +1,0 @@
-framework module "Wabridge" {
-	header "ref.h"
-    header "Wabridge.objc.h"
-    header "Universe.objc.h"
-    header "Wabridge.h"
-
-    export *
-}
