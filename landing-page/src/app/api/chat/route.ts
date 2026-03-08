@@ -108,9 +108,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Determine which API key to use
-  const apiKey = hasCustomKey
-    ? decryptApiKey(user.custom_api_key!)
-    : process.env.ANTHROPIC_API_KEY;
+  let apiKey: string | undefined;
+  try {
+    apiKey = hasCustomKey
+      ? decryptApiKey(user.custom_api_key!)
+      : process.env.ANTHROPIC_API_KEY;
+  } catch (err) {
+    console.error('[/api/chat] failed to decrypt custom API key', err);
+    return NextResponse.json(
+      { error: 'Saved API key is invalid or corrupted. Please re-add it in settings.', code: 'INVALID_API_KEY' },
+      { status: 422 }
+    );
+  }
 
   if (!apiKey) {
     console.error('[/api/chat] ANTHROPIC_API_KEY is not set');
