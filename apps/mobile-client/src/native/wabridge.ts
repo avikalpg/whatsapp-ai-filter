@@ -58,11 +58,12 @@ const NativeWabridge = NativeModules.Wabridge
     );
 
 /**
- * Initialize the bridge with the given SQLite DB path and Claude API key.
+ * Initialize the bridge with the given SQLite DB path and auth token.
+ * authToken is the JWT from the backend (or a sk-ant-* API key for direct Anthropic calls).
  * Must be called once before any other method.
  */
-export async function initBridge(dbPath: string, claudeApiKey: string): Promise<void> {
-  return NativeWabridge.initBridge(dbPath, claudeApiKey);
+export async function initBridge(dbPath: string, authToken: string): Promise<void> {
+  return NativeWabridge.initBridge(dbPath, authToken);
 }
 
 /**

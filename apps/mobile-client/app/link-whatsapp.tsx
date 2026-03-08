@@ -11,18 +11,19 @@ import {
 import { useAppStore } from '../src/stores/appStore';
 
 export default function LinkWhatsAppScreen() {
-  const { startPairing, refreshLinkedStatus, pairingCode, error, clearError } = useAppStore();
+  const { startPairing, confirmLinked, pairingCode, error, clearError } = useAppStore();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Poll linked status while we have a pairing code displayed
+  // Poll until WhatsApp is linked. Use confirmLinked (not refreshLinkedStatus) so
+  // the trial is activated immediately after the session is established.
   useEffect(() => {
     if (!pairingCode) return;
     const interval = setInterval(() => {
-      refreshLinkedStatus();
+      confirmLinked();
     }, 3000);
     return () => clearInterval(interval);
-  }, [pairingCode, refreshLinkedStatus]);
+  }, [pairingCode, confirmLinked]);
 
   useEffect(() => {
     if (error) {

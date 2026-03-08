@@ -23,7 +23,7 @@ export async function callClaude(
   messages: Message[],
   authToken: string,
   serverUrl: string = DEFAULT_SERVER_URL,
-  model = 'claude-3-5-haiku-20241022',
+  model = 'claude-3-5-haiku-latest',
   maxTokens = 1024
 ): Promise<string> {
   const res = await fetch(`${serverUrl}/api/chat`, {

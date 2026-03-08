@@ -18,7 +18,7 @@ const (
 	// Fallback: call Anthropic directly if authToken looks like an API key (sk-ant-*)
 	claudeAPIURL      = "https://api.anthropic.com/v1/messages"
 	anthropicVersion  = "2023-06-01"
-	claudeModel       = "claude-haiku-4-5-20251001"
+	claudeModel       = "claude-3-5-haiku-latest"
 )
 
 const triageSystemPrompt = `You are a message triage assistant. Given a WhatsApp message and a filter description, respond ONLY with valid JSON: {"relevant": true/false, "reason": "one sentence", "confidence": 0.0-1.0}. No other text.`

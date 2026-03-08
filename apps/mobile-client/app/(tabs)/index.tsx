@@ -28,15 +28,17 @@ export default function InboxScreen() {
 
   const loadAll = useCallback(async () => {
     await loadFilters();
-    for (const f of filters) {
+    // Read fresh filters directly from store state — avoids stale closure
+    // where the `filters` captured at callback-creation time is still empty.
+    const freshFilters = useAppStore.getState().filters;
+    for (const f of freshFilters) {
       await loadMatches(f.id);
     }
-  }, [filters, loadFilters, loadMatches]);
+  }, [loadFilters, loadMatches]);
 
   useEffect(() => {
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadAll]);
 
   // Merge and sort all matches
   const allMatches: FilterMatch[] = Object.values(matches)
