@@ -14,6 +14,7 @@
     "expo": "~55.0.5",
     "expo-constants": "~55.0.7",
     "expo-crypto": "^55.0.9",
+    "expo-file-system": "~55.0.10",
     "expo-linking": "~55.0.7",
     "expo-router": "~55.0.4",
     "expo-secure-store": "~55.0.8",

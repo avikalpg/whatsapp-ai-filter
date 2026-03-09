@@ -5,6 +5,7 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import type { Filter, FilterMatch, SyncResult } from '../native/wabridge';
@@ -297,5 +298,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {
-  return 'waci.db';
+  // FileSystem.documentDirectory is the app's private writable directory on
+  // Android (/data/data/<pkg>/files/) and iOS. The Go bridge requires an
+  // absolute path — a bare filename resolves to the process cwd which is
+  // not writable on Android, causing "unable to open database file".
+  const dir = FileSystem.documentDirectory ?? '';
+  return `${dir}waci.db`;
 }
