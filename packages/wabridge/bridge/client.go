@@ -26,6 +26,13 @@ type Client struct {
 	dbPath  string
 	store   *Store
 	waStore *sqlstore.Container
+
+	// pairingClient is held open after StartPairing returns the code.
+	// WhatsApp needs the WebSocket connection to remain alive so it can
+	// send the PairSuccess event back when the user enters the code.
+	// IsLinked() checks whether pairing completed and cleans it up.
+	pairingClient *whatsmeow.Client
+	pairingMu     sync.Mutex
 }
 
 // NewClient creates a new Client using the given dbPath for the whatsmeow SQLite device store.
@@ -61,7 +68,24 @@ func NewClient(dbPath string, store *Store) (*Client, error) {
 }
 
 // IsLinked returns true if there is at least one device stored.
+// It also checks whether an in-progress pairing has completed: whatsmeow
+// sets client.Store.ID once WhatsApp delivers the PairSuccess event.
+// When pairing completes, the pairing connection is disconnected and released.
 func (c *Client) IsLinked() bool {
+	c.pairingMu.Lock()
+	if c.pairingClient != nil {
+		if c.pairingClient.Store.ID != nil {
+			// Pairing succeeded — WhatsApp saved credentials to the DB.
+			c.pairingClient.Disconnect()
+			c.pairingClient = nil
+			c.pairingMu.Unlock()
+			return true
+		}
+		c.pairingMu.Unlock()
+		return false
+	}
+	c.pairingMu.Unlock()
+
 	ctx := context.Background()
 	devices, err := c.waStore.GetAllDevices(ctx)
 	if err != nil {
@@ -72,6 +96,12 @@ func (c *Client) IsLinked() bool {
 
 // StartPairing initiates a phone-number pairing flow.
 // phoneNumber should be in E.164 format (with or without leading +).
+//
+// IMPORTANT: this function returns the pairing code but does NOT disconnect.
+// The WebSocket connection must stay alive so WhatsApp can deliver the
+// PairSuccess event when the user enters the code on their phone.
+// Call IsLinked() to poll for completion; it cleans up the connection once
+// WhatsApp confirms the link (client.Store.ID is set by whatsmeow).
 func (c *Client) StartPairing(phoneNumber string) (string, error) {
 	// Strip leading + — whatsmeow PairPhone does not accept it
 	phone := strings.TrimPrefix(phoneNumber, "+")
@@ -85,17 +115,24 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 	logger := waLog.Stdout("wabridge-client", "WARN", true)
 	client := whatsmeow.NewClient(deviceStore, logger)
 
-	// Connect without a message handler for pairing
 	if err := client.Connect(); err != nil {
 		return "", fmt.Errorf("failed to connect for pairing: %w", err)
 	}
-	defer client.Disconnect()
 
-	pairCtx := context.Background()
-	code, err := client.PairPhone(pairCtx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	code, err := client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
 	if err != nil {
+		client.Disconnect()
 		return "", fmt.Errorf("failed to pair phone: %w", err)
 	}
+
+	// Keep the connection alive — WhatsApp will send PairSuccess over this socket.
+	c.pairingMu.Lock()
+	if c.pairingClient != nil {
+		c.pairingClient.Disconnect() // clean up any stale previous attempt
+	}
+	c.pairingClient = client
+	c.pairingMu.Unlock()
+
 	return code, nil
 }
 
