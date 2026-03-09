@@ -3,6 +3,7 @@ package bridge
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -31,9 +32,26 @@ type Client struct {
 func NewClient(dbPath string, store *Store) (*Client, error) {
 	logger := waLog.Stdout("wabridge", "WARN", true)
 	ctx := context.Background()
-	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), logger)
+
+	// Open the raw DB first so we can apply PRAGMA foreign_keys = ON before
+	// sqlstore.Upgrade() runs (it returns an error if FK are not enabled).
+	// We do NOT use a "file:..." URI here: go-sqlite3 on Android gomobile builds
+	// may not have SQLITE_OPEN_URI compiled in, so "file:/path?..." is treated
+	// as a literal filename that doesn't exist.
+	rawDB, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open whatsmeow store: %w", err)
+		return nil, fmt.Errorf("failed to open sqlite db: %w", err)
+	}
+	rawDB.SetMaxOpenConns(1)
+	if _, err = rawDB.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		_ = rawDB.Close()
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
+	container := sqlstore.NewWithDB(rawDB, "sqlite3", logger)
+	if err = container.Upgrade(ctx); err != nil {
+		_ = rawDB.Close()
+		return nil, fmt.Errorf("failed to upgrade whatsmeow store: %w", err)
 	}
 	return &Client{
 		dbPath:  dbPath,

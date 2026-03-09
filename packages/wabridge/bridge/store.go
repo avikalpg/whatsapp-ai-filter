@@ -57,13 +57,24 @@ type SaveMatchParams struct {
 
 // NewStore opens (or creates) the SQLite database at dbPath and runs migrations.
 func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL", dbPath))
+	// Use a raw file path (no file: URI scheme). go-sqlite3 wraps sqlite3_open_v2
+	// with SQLITE_OPEN_URI only when compiled with that flag; when SQLITE_OPEN_URI
+	// is absent (e.g. gomobile Android builds) the string "file:/path?..." is
+	// treated as a literal filename that doesn't exist. A raw absolute path always
+	// works. Pragmas are applied separately below.
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open waci store: %w", err)
 	}
 	// SQLite does not support concurrent writes; a single connection avoids
 	// "database is locked" errors when sync and UI calls overlap.
 	db.SetMaxOpenConns(1)
+	// Apply pragmas explicitly — do not rely on URI query params, which
+	// require SQLITE_OPEN_URI support that may not be present in gomobile builds.
+	if _, err = db.Exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to apply pragmas: %w", err)
+	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
