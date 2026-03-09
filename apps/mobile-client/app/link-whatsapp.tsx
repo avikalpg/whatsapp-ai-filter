@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Clipboard,
 } from 'react-native';
 import { useAppStore } from '../src/stores/appStore';
 
@@ -70,7 +71,17 @@ export default function LinkWhatsAppScreen() {
       {pairingCode ? (
         <View style={styles.codeBox}>
           <Text style={styles.codeLabel}>Your pairing code:</Text>
-          <Text style={styles.code}>{pairingCode}</Text>
+          <TouchableOpacity
+            onPress={() => {
+              Clipboard.setString(pairingCode);
+              Alert.alert('Copied!', 'Pairing code copied to clipboard.');
+            }}
+            activeOpacity={0.7}
+            style={styles.codeTouchable}
+          >
+            <Text style={styles.code}>{pairingCode}</Text>
+            <Text style={styles.copyHint}>Tap to copy</Text>
+          </TouchableOpacity>
           <Text style={styles.codeHint}>
             Open WhatsApp → Settings → Linked Devices → Link a Device and enter this code.
           </Text>
@@ -109,7 +120,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   codeLabel: { fontSize: 14, color: '#666', marginBottom: 8 },
+  codeTouchable: { alignItems: 'center', padding: 8 },
   code: { fontSize: 36, fontWeight: '800', letterSpacing: 6, color: '#000' },
+  copyHint: { fontSize: 12, color: '#25D366', marginTop: 4 },
   codeHint: { fontSize: 13, color: '#888', textAlign: 'center', marginTop: 12 },
   waitingText: { fontSize: 13, color: '#888', marginTop: 4 },
 });
