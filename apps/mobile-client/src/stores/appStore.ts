@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import type { Filter, FilterMatch, SyncResult } from '../native/wabridge';
@@ -103,8 +103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const trialExpiresAt = await AsyncStorage.getItem('waci_trial_expires_at');
 
       const lastSync = await AsyncStorage.getItem(LAST_SYNC_KEY);
-      const dbPath = await AsyncStorage.getItem(DB_PATH_KEY) ?? getDefaultDbPath();
-      await AsyncStorage.setItem(DB_PATH_KEY, dbPath);
+      const dbPath = await resolveDbPath();
 
       if (!authToken) {
         // First install — register device (reissues automatically if already registered).
@@ -115,6 +114,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       // Init bridge — if this throws, authToken is NOT persisted so next launch retries cleanly.
+      console.log('[WACI] calling initBridge with dbPath:', dbPath);
       await WaBridge.initBridge(dbPath, authToken);
       await SecureStore.setItemAsync('waci_auth_token', authToken);
 
@@ -297,11 +297,38 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function getDefaultDbPath(): string {
-  // FileSystem.documentDirectory returns a file:// URI such as
-  // "file:///data/user/0/com.pkg/files/". The Go bridge's SQLite DSN is
-  // built as `file:<dbPath>?...`, so we must strip the scheme to avoid
-  // producing "file:file:///..." which SQLite rejects.
-  const dir = (FileSystem.documentDirectory ?? '').replace(/^file:\/\//, '');
-  return `${dir}waci.db`;
+/**
+ * Resolve the absolute path for the SQLite DB file.
+ *
+ * Rules:
+ * - Cached paths that don't start with '/' are stale (e.g. bare 'waci.db'
+ *   from before this fix) — discard them and recompute.
+ * - FileSystem.documentDirectory returns a file:// URI; strip the scheme
+ *   because the Go bridge prepends "file:" itself.
+ * - Explicitly create the directory so SQLite never sees ENOENT on the
+ *   parent dir on a fresh install.
+ */
+async function resolveDbPath(): Promise<string> {
+  const cached = await AsyncStorage.getItem(DB_PATH_KEY);
+  if (cached && cached.startsWith('/')) {
+    console.log('[WACI] using cached dbPath:', cached);
+    return cached;
+  }
+
+  const docUri = FileSystem.documentDirectory;
+  console.log('[WACI] FileSystem.documentDirectory:', docUri);
+  if (!docUri) {
+    throw new Error('FileSystem.documentDirectory is not available');
+  }
+
+  // Ensure the directory exists (no-op if already present)
+  await FileSystem.makeDirectoryAsync(docUri, { intermediates: true }).catch(() => {});
+
+  // Strip "file://" so Go bridge doesn't produce "file:file://..."
+  const rawDir = docUri.replace(/^file:\/\//, '');
+  const dbPath = `${rawDir}waci.db`;
+  console.log('[WACI] resolved dbPath:', dbPath);
+
+  await AsyncStorage.setItem(DB_PATH_KEY, dbPath);
+  return dbPath;
 }
