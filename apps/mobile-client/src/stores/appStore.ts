@@ -97,19 +97,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       let authToken = await SecureStore.getItemAsync('waci_auth_token');
       const trialExpiresAt = await AsyncStorage.getItem('waci_trial_expires_at');
 
-      if (!authToken) {
-        // First install — register device (reissues automatically if already registered)
-        const reg = await registerDevice(deviceId, SERVER_URL);
-        authToken = reg.token;
-        await SecureStore.setItemAsync('waci_auth_token', authToken);
-      }
-
       const lastSync = await AsyncStorage.getItem(LAST_SYNC_KEY);
       const dbPath = await AsyncStorage.getItem(DB_PATH_KEY) ?? getDefaultDbPath();
       await AsyncStorage.setItem(DB_PATH_KEY, dbPath);
 
-      // Init bridge with auth token (used for Claude calls)
+      if (!authToken) {
+        // First install — register device (reissues automatically if already registered).
+        // Persist only after bridge init succeeds (below) so a failed init
+        // does not lock us into a bad token on next launch.
+        const reg = await registerDevice(deviceId, SERVER_URL);
+        authToken = reg.token;
+      }
+
+      // Init bridge — if this throws, authToken is NOT persisted so next launch retries cleanly.
       await WaBridge.initBridge(dbPath, authToken);
+      await SecureStore.setItemAsync('waci_auth_token', authToken);
+
       const linked = await WaBridge.isLinked();
 
       set({
@@ -201,7 +204,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteFilter: async (id: string) => {
     try {
       await WaBridge.deleteFilter(id);
-      set({ filters: get().filters.filter((f) => f.id !== id) });
+      // Prune the deleted filter from both the filters list and the matches cache.
+      const { matches, matchesLoading } = get();
+      const nextMatches = { ...matches };
+      delete nextMatches[id];
+      const nextMatchesLoading = { ...matchesLoading };
+      delete nextMatchesLoading[id];
+      set({
+        filters: get().filters.filter((f) => f.id !== id),
+        matches: nextMatches,
+        matchesLoading: nextMatchesLoading,
+      });
     } catch (e: unknown) {
       set({ error: String(e) });
     }

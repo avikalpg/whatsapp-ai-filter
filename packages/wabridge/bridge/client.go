@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -92,7 +93,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	logger := waLog.Stdout("wabridge-sync", "WARN", true)
 	wac := whatsmeow.NewClient(deviceStore, logger)
 
-	// Collect messages before registering to avoid races
+	// Collect messages from the event handler goroutine into a mutex-protected slice.
 	type rawMsg struct {
 		msgID     string
 		senderJID string
@@ -100,6 +101,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 		body      string
 		timestamp int64
 	}
+	var mu sync.Mutex
 	collected := make([]rawMsg, 0, 64)
 
 	wac.AddEventHandler(func(evt interface{}) {
@@ -123,6 +125,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 			if ts <= lastSyncTimestamp {
 				return
 			}
+			mu.Lock()
 			collected = append(collected, rawMsg{
 				msgID:     v.Info.ID,
 				senderJID: v.Info.Sender.String(),
@@ -130,6 +133,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 				body:      body,
 				timestamp: ts,
 			})
+			mu.Unlock()
 		}
 	})
 
@@ -138,10 +142,12 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	}
 	defer wac.Disconnect()
 
-	// Wait up to 30 seconds for history sync / live messages
+	// Wait up to 30 seconds for history sync / live messages, then disconnect
+	// so the event handler is stopped before we read `collected`.
 	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	<-syncCtx.Done()
+	wac.Disconnect() // explicit disconnect stops event handler before we read collected
 
 	if len(collected) == 0 {
 		return 0, nil

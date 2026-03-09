@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -56,15 +57,25 @@ type SaveMatchParams struct {
 
 // NewStore opens (or creates) the SQLite database at dbPath and runs migrations.
 func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL", dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open waci store: %w", err)
 	}
+	// SQLite does not support concurrent writes; a single connection avoids
+	// "database is locked" errors when sync and UI calls overlap.
+	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("migration failed: %w", err)
 	}
 	return s, nil
+}
+
+// newID returns a random-suffix identifier with the given prefix.
+// Using nanosecond time + random bits makes collisions astronomically unlikely.
+func newID(prefix string) string {
+	return fmt.Sprintf("%s_%d_%04x", prefix, time.Now().UnixNano(), rand.Intn(0x10000))
 }
 
 func (s *Store) migrate() error {
@@ -141,7 +152,7 @@ func (s *Store) SaveFilter(filterJson string) (string, error) {
 	}
 	now := time.Now().Unix()
 	if f.ID == "" {
-		f.ID = fmt.Sprintf("flt_%d", now)
+		f.ID = newID("flt")
 	}
 	if f.CreatedAt == 0 {
 		f.CreatedAt = now
@@ -172,7 +183,8 @@ func (s *Store) DeleteFilter(id string) error {
 // SaveMatch persists a filter match and returns it as JSON.
 func (s *Store) SaveMatch(p SaveMatchParams) (string, error) {
 	now := time.Now().Unix()
-	id := fmt.Sprintf("match_%d_%s", now, p.MessageID)
+	// Include FilterID so the same message matched by two different filters gets distinct IDs.
+	id := fmt.Sprintf("match_%s_%s_%04x", p.FilterID, p.MessageID, rand.Intn(0x10000))
 	m := FilterMatch{
 		ID:              id,
 		FilterID:        p.FilterID,
