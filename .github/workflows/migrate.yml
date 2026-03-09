@@ -21,4 +21,4 @@ jobs:
       - name: Run migration
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: psql "$DATABASE_URL" -f landing-page/db/setup.sql
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f landing-page/db/setup.sql
