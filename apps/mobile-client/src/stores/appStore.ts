@@ -298,10 +298,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {
-  // FileSystem.documentDirectory is the app's private writable directory on
-  // Android (/data/data/<pkg>/files/) and iOS. The Go bridge requires an
-  // absolute path — a bare filename resolves to the process cwd which is
-  // not writable on Android, causing "unable to open database file".
-  const dir = FileSystem.documentDirectory ?? '';
+  // FileSystem.documentDirectory returns a file:// URI such as
+  // "file:///data/user/0/com.pkg/files/". The Go bridge's SQLite DSN is
+  // built as `file:<dbPath>?...`, so we must strip the scheme to avoid
+  // producing "file:file:///..." which SQLite rejects.
+  const dir = (FileSystem.documentDirectory ?? '').replace(/^file:\/\//, '');
   return `${dir}waci.db`;
 }
