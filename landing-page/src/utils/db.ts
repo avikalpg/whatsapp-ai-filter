@@ -8,7 +8,8 @@ import { Pool } from 'pg';
 // only one connection pool is created.
 declare global {
   var _dbConnection: Pool | undefined;
-  var _dbMigrated: boolean | undefined;
+  /** Cached migration promise — shared across concurrent cold-start requests. */
+  var _dbMigrationPromise: Promise<void> | undefined;
 }
 
 function createPool(): Pool {
@@ -32,23 +33,29 @@ if (process.env.NODE_ENV === 'production') {
 
 /**
  * Run db/setup.sql exactly once per process lifetime.
- * Every statement uses CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS,
- * so concurrent cold-starts are safe and repeated calls are no-ops.
+ *
+ * Stores the in-flight Promise in a global so concurrent requests that arrive
+ * during the first migration all await the *same* promise rather than each
+ * seeing a stale boolean flag and racing past it.
+ *
+ * On failure the promise is cleared so the next request retries cleanly.
  */
-async function migrate(): Promise<void> {
-  if (global._dbMigrated) return;
-  global._dbMigrated = true; // optimistic — prevents parallel cold-start races
-
-  try {
-    const sqlPath = path.join(process.cwd(), 'db', 'setup.sql');
-    const sql = fs.readFileSync(sqlPath, 'utf8');
-    await conn.query(sql);
-  } catch (err) {
-    // Reset flag so the next request retries (e.g. transient DB unavailability)
-    global._dbMigrated = false;
-    console.error('[db] Migration failed:', err);
-    throw err;
+function migrate(): Promise<void> {
+  if (!global._dbMigrationPromise) {
+    global._dbMigrationPromise = (async () => {
+      try {
+        const sqlPath = path.join(process.cwd(), 'db', 'setup.sql');
+        const sql = fs.readFileSync(sqlPath, 'utf8');
+        await conn.query(sql);
+      } catch (err) {
+        // Clear so the next request retries (e.g. transient DB unavailability)
+        global._dbMigrationPromise = undefined;
+        console.error('[db] Migration failed:', err);
+        throw err;
+      }
+    })();
   }
+  return global._dbMigrationPromise;
 }
 
 // Wrap the pool so every first query triggers the migration transparently.
