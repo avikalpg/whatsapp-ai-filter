@@ -26,6 +26,8 @@ export type AppScreen = 'splash' | 'link-whatsapp' | 'inbox';
 interface AppState {
   // Setup
   isInitialized: boolean;
+  /** Non-null when initialize() failed — bridge is not ready, show retry UI. */
+  initError: string | null;
   authToken: string | null;
   trialExpiresAt: string | null;
   isLinked: boolean;
@@ -49,6 +51,7 @@ interface AppState {
 
   // Actions
   initialize: () => Promise<void>;
+  retryInit: () => Promise<void>;
   startPairing: (phoneNumber: string) => Promise<void>;
   confirmLinked: () => Promise<void>;
   refreshLinkedStatus: () => Promise<void>;
@@ -66,6 +69,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   isInitialized: false,
+  initError: null,
   authToken: null,
   trialExpiresAt: null,
   isLinked: false,
@@ -123,8 +127,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         isInitialized: true,
       });
     } catch (e: unknown) {
-      set({ error: String(e), isInitialized: true });
+      // Keep isInitialized:false so we don't show the Link WhatsApp screen
+      // with an uninitialised bridge. The layout will show a retry screen.
+      set({ initError: String(e), isInitialized: false });
     }
+  },
+
+  // ── retryInit ──────────────────────────────────────────────────────────
+  // Clears the init error and re-runs initialize(). Called from the retry UI.
+
+  retryInit: async () => {
+    set({ initError: null });
+    return get().initialize();
   },
 
   // ── startPairing ───────────────────────────────────────────────────────
