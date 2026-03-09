@@ -54,7 +54,7 @@ async function migrate(): Promise<void> {
 // Wrap the pool so every first query triggers the migration transparently.
 // After the first successful migration, subsequent calls skip straight to the query.
 const db = {
-  async query<T extends object = object>(
+  async query<T extends import('pg').QueryResultRow = import('pg').QueryResultRow>(
     text: string,
     params?: unknown[]
   ): Promise<import('pg').QueryResult<T>> {
