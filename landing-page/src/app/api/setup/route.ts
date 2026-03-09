@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS mobile_users (
     whatsapp_linked BOOLEAN NOT NULL DEFAULT FALSE,
     custom_api_key TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_mobile_users_device_id ON mobile_users (device_id);
+-- Note: UNIQUE on device_id already creates an implicit B-tree index in PostgreSQL;
+-- a separate CREATE INDEX is intentionally omitted to avoid redundancy.
 
 CREATE TABLE IF NOT EXISTS usage_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -52,15 +53,31 @@ CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs (created_at D
 `;
 
 export async function POST(req: NextRequest) {
+  // Fail fast with a clear 500 when the operator forgot to set SETUP_SECRET,
+  // rather than returning 401 for every request with no indication why.
+  if (!process.env.SETUP_SECRET) {
+    console.error('[/api/setup] SETUP_SECRET env var is not configured');
+    return NextResponse.json(
+      { error: 'Server misconfiguration: SETUP_SECRET is not set' },
+      { status: 500 }
+    );
+  }
+
   const secret = req.headers.get('x-setup-secret');
   if (!secret || secret !== process.env.SETUP_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
   try {
     await db.query(SETUP_SQL);
     return NextResponse.json({ ok: true, message: 'Database schema applied successfully.' });
   } catch (err) {
+    // Log the full error server-side; return a generic message to avoid leaking
+    // internal SQL/driver details from this privileged admin endpoint.
     console.error('[/api/setup]', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Database migration failed. Check server logs for details.' },
+      { status: 500 }
+    );
   }
 }
