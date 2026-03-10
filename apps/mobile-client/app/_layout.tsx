@@ -22,14 +22,17 @@ export default function RootLayout() {
 
   // Init failed (e.g. backend unreachable, DB not set up) — show retry screen
   if (initError) {
-    const isServerError = initError.includes('500') || initError.includes('Registration failed');
+    const initErrorMessage =
+      typeof initError === 'string' ? initError : String(initError);
+    const isServerError =
+      initErrorMessage.includes('500') || initErrorMessage.includes('Registration failed');
     return (
       <View style={styles.splash}>
         <Text style={styles.errorTitle}>Couldn't connect</Text>
         <Text style={styles.errorBody}>
           {isServerError
             ? 'The WACI server is unavailable.\nPlease try again in a moment.'
-            : initError}
+            : initErrorMessage}
         </Text>
         <TouchableOpacity style={styles.retryBtn} onPress={retryInit}>
           <Text style={styles.retryText}>Retry</Text>
