@@ -12,6 +12,7 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~55.0.5",
+    "expo-clipboard": "^55.0.8",
     "expo-constants": "~55.0.7",
     "expo-crypto": "^55.0.9",
     "expo-file-system": "~55.0.10",

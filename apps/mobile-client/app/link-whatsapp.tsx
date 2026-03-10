@@ -7,8 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Clipboard,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useAppStore } from '../src/stores/appStore';
 
 export default function LinkWhatsAppScreen() {
@@ -72,8 +72,8 @@ export default function LinkWhatsAppScreen() {
         <View style={styles.codeBox}>
           <Text style={styles.codeLabel}>Your pairing code:</Text>
           <TouchableOpacity
-            onPress={() => {
-              Clipboard.setString(pairingCode);
+            onPress={async () => {
+              await Clipboard.setStringAsync(pairingCode);
               Alert.alert('Copied!', 'Pairing code copied to clipboard.');
             }}
             activeOpacity={0.7}
