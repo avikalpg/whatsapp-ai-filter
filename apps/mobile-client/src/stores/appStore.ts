@@ -46,6 +46,8 @@ interface AppState {
   lastSyncTimestamp: number;
   syncing: boolean;
   lastSyncResult: SyncResult | null;
+  historySyncing: boolean;
+  historySyncDone: boolean;
 
   // Error / status
   error: string | null;
@@ -61,6 +63,7 @@ interface AppState {
   deleteFilter: (id: string) => Promise<void>;
   loadMatches: (filterId: string, limit?: number) => Promise<void>;
   syncAndTriage: () => Promise<void>;
+  startHistorySync: () => Promise<void>;
   unlink: () => Promise<void>;
   refreshToken: () => Promise<void>;
   clearError: () => void;
@@ -82,6 +85,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastSyncTimestamp: 0,
   syncing: false,
   lastSyncResult: null,
+  historySyncing: false,
+  historySyncDone: false,
   error: null,
 
   // ── initialize ──────────────────────────────────────────────────────────
@@ -165,6 +170,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           const { trial_expires_at } = await activateTrial(authToken, SERVER_URL);
           await AsyncStorage.setItem('waci_trial_expires_at', trial_expires_at);
           set({ isLinked: true, trialExpiresAt: trial_expires_at });
+          // Kick off history sync immediately after linking so the inbox
+          // has real content the moment the user lands there.
+          get().startHistorySync();
         }
       }
     } catch (e: unknown) {
@@ -201,6 +209,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const saved = await WaBridge.saveFilter(filter);
       const filters = get().filters;
+      const isNew = !filters.find((f) => f.id === saved.id);
       const idx = filters.findIndex((f) => f.id === saved.id);
       if (idx >= 0) {
         const next = [...filters];
@@ -208,6 +217,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ filters: next });
       } else {
         set({ filters: [saved, ...filters] });
+      }
+      // For a newly created filter, retroactively triage raw messages stored
+      // from history sync so users immediately see matching historical content.
+      if (isNew) {
+        try {
+          await WaBridge.triageStoredMessages(saved.id);
+          await get().loadMatches(saved.id);
+        } catch (_) {
+          // Non-fatal — matches can be loaded later via sync.
+        }
       }
     } catch (e: unknown) {
       set({ error: String(e) });
@@ -247,6 +266,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     } catch (e: unknown) {
       set({ error: String(e), matchesLoading: { ...get().matchesLoading, [filterId]: false } });
+    }
+  },
+
+  // ── startHistorySync ───────────────────────────────────────────────────
+  // Fetches WhatsApp message history (up to ~90 days), triages against all
+  // filters, and refreshes the inbox. Called automatically after pairing.
+
+  startHistorySync: async () => {
+    if (get().historySyncing || get().historySyncDone) return;
+    set({ historySyncing: true });
+    try {
+      const result = await WaBridge.startHistorySync();
+      set({ historySyncing: false, historySyncDone: true, lastSyncResult: result });
+      // Refresh all filter matches so the inbox shows historical content.
+      const freshFilters = useAppStore.getState().filters;
+      for (const f of freshFilters) {
+        await useAppStore.getState().loadMatches(f.id);
+      }
+    } catch (e: unknown) {
+      set({ historySyncing: false, error: String(e) });
     }
   },
 

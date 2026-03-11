@@ -20,10 +20,12 @@ export default function InboxScreen() {
     filters,
     matches,
     syncing,
+    historySyncing,
     lastSyncResult,
     syncAndTriage,
     loadFilters,
     loadMatches,
+    startHistorySync,
   } = useAppStore();
 
   const loadAll = useCallback(async () => {
@@ -66,6 +68,12 @@ export default function InboxScreen() {
 
   return (
     <View style={styles.container}>
+      {historySyncing ? (
+        <View style={styles.historyBanner}>
+          <ActivityIndicator size="small" color="#25D366" style={{ marginRight: 8 }} />
+          <Text style={styles.historyBannerText}>Syncing message history…</Text>
+        </View>
+      ) : null}
       <View style={styles.syncBar}>
         <Text style={styles.syncInfo}>
           {lastSyncResult
@@ -139,4 +147,15 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyText: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
   emptyHint: { fontSize: 14, color: '#888', textAlign: 'center' },
+  historyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e8faf0',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#b2dfcc',
+  },
+  historyBannerText: { fontSize: 13, color: '#1a7a45', fontWeight: '500' },
 });

@@ -116,6 +116,29 @@ export async function getMatches(filterId: string, limit: number = 50): Promise<
   return JSON.parse(json) as FilterMatch[];
 }
 
+/**
+ * Triage all raw messages stored from history sync against a specific filter.
+ * Call this immediately after creating a new filter so users see matching
+ * historical messages even though the filter didn't exist when history was synced.
+ */
+export async function triageStoredMessages(filterId: string): Promise<SyncResult> {
+  return NativeWabridge.triageStoredMessages(filterId);
+}
+
+/**
+ * Connect to WhatsApp, collect message history (up to ~90 days) via the
+ * WhatsApp HistorySync protocol, run AI triage against all saved filters,
+ * and disconnect.
+ *
+ * The built-in "All Messages" filter (prompt="*") matches everything without
+ * any API call, so this is safe to call immediately after pairing.
+ *
+ * Call loadMatches() afterwards to refresh the inbox.
+ */
+export async function startHistorySync(): Promise<SyncResult> {
+  return NativeWabridge.startHistorySync();
+}
+
 /** Remove the linked WhatsApp device (logout). */
 export async function unlink(): Promise<void> {
   return NativeWabridge.unlink();

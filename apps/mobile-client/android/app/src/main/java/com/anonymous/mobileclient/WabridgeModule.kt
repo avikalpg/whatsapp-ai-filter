@@ -103,6 +103,44 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // ── triageStoredMessages ─────────────────────────────────────────────────
+    // Run a filter against all raw messages stored during history sync.
+    // Called automatically when a new filter is created.
+
+    @ReactMethod
+    fun triageStoredMessages(filterId: String, promise: Promise) {
+        runOnBackground(promise) {
+            val b = requireBridge()
+            val callback = object : MessageCallback {
+                override fun onMessage(jsonPayload: String) {}
+            }
+            val result = b.triageStoredMessages(filterId, callback)
+            val map = Arguments.createMap()
+            map.putInt("messagesSynced", result.messagesSynced.toInt())
+            map.putString("error", result.error ?: "")
+            map
+        }
+    }
+
+    // ── startHistorySync ─────────────────────────────────────────────────────
+
+    @ReactMethod
+    fun startHistorySync(promise: Promise) {
+        runOnBackground(promise) {
+            val b = requireBridge()
+            val callback = object : MessageCallback {
+                override fun onMessage(jsonPayload: String) {
+                    // Matches are persisted to DB; JS polls getMatches() to read them.
+                }
+            }
+            val result = b.startHistorySync(callback)
+            val map = Arguments.createMap()
+            map.putInt("messagesSynced", result.messagesSynced.toInt())
+            map.putString("error", result.error ?: "")
+            map
+        }
+    }
+
     // ── unlink ───────────────────────────────────────────────────────────────
 
     @ReactMethod

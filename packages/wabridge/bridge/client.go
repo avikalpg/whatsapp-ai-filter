@@ -11,6 +11,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -136,6 +138,213 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 	return code, nil
 }
 
+// SyncHistory connects to WhatsApp, collects the HistorySync messages delivered
+// on first connection, runs AI triage against all saved filters, and disconnects.
+// Matched messages are persisted and delivered via callback.
+// Returns the number of messages processed (across all conversations).
+func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
+	ctx := context.Background()
+	deviceStore, err := c.waStore.GetFirstDevice(ctx)
+	if err != nil || deviceStore == nil {
+		return 0, fmt.Errorf("no linked device found — call StartPairing first")
+	}
+
+	logger := waLog.Stdout("wabridge-history", "WARN", true)
+	wac := whatsmeow.NewClient(deviceStore, logger)
+
+	type rawMsg struct {
+		msgID      string
+		senderJID  string
+		chatJID    string
+		chatName   string
+		senderName string
+		body       string
+		timestamp  int64
+	}
+	var mu sync.Mutex
+	collected := make([]rawMsg, 0, 512)
+
+	// done is closed when WhatsApp signals progress=100 (sync complete).
+	done := make(chan struct{}, 1)
+	var doneOnce sync.Once
+
+	wac.AddEventHandler(func(evt interface{}) {
+		v, ok := evt.(*events.HistorySync)
+		if !ok {
+			return
+		}
+
+		syncType := v.Data.GetSyncType()
+		// Only process message-bearing sync types.
+		if syncType != waHistorySync.HistorySync_INITIAL_BOOTSTRAP &&
+			syncType != waHistorySync.HistorySync_FULL &&
+			syncType != waHistorySync.HistorySync_RECENT {
+			return
+		}
+
+		for _, conv := range v.Data.GetConversations() {
+			chatJID := conv.GetID()
+			chatName := conv.GetName()
+			if chatName == "" {
+				chatName = chatJID
+			}
+			for _, histMsg := range conv.GetMessages() {
+				webMsg := histMsg.GetMessage()
+				if webMsg == nil {
+					continue
+				}
+				key := webMsg.GetKey()
+				if key.GetFromMe() {
+					continue
+				}
+				body := extractBodyFromMsg(webMsg.GetMessage())
+				if body == "" {
+					continue
+				}
+				senderJID := key.GetParticipant()
+				if senderJID == "" {
+					senderJID = chatJID
+				}
+				senderName := webMsg.GetPushName()
+				if senderName == "" {
+					senderName = senderJID
+				}
+				mu.Lock()
+				collected = append(collected, rawMsg{
+					msgID:      key.GetID(),
+					senderJID:  senderJID,
+					chatJID:    chatJID,
+					chatName:   chatName,
+					senderName: senderName,
+					body:       body,
+					timestamp:  int64(webMsg.GetMessageTimestamp()),
+				})
+				mu.Unlock()
+			}
+		}
+
+		if v.Data.GetProgress() >= 100 {
+			doneOnce.Do(func() { close(done) })
+		}
+	})
+
+	if err := wac.Connect(); err != nil {
+		return 0, fmt.Errorf("failed to connect for history sync: %w", err)
+	}
+	defer wac.Disconnect()
+
+	// Wait until WhatsApp signals progress=100 or 45-second timeout.
+	select {
+	case <-done:
+	case <-time.After(45 * time.Second):
+	}
+	wac.Disconnect() // stop event handler before reading collected
+
+	// Always persist raw messages so they can be triaged against future filters.
+	for _, msg := range collected {
+		_ = store.SaveRawMessage(RawMessage{
+			MessageID:  msg.msgID,
+			SenderJID:  msg.senderJID,
+			ChatJID:    msg.chatJID,
+			ChatName:   msg.chatName,
+			SenderName: msg.senderName,
+			Body:       msg.body,
+			ReceivedAt: msg.timestamp,
+		})
+	}
+
+	if len(collected) == 0 {
+		return 0, nil
+	}
+
+	// Triage against any filters that already exist (e.g. the default "All Messages" filter).
+	filters, err := store.listFilters()
+	if err != nil {
+		return len(collected), fmt.Errorf("failed to load filters: %w", err)
+	}
+
+	triage := NewTriageClient(claudeApiKey, "")
+	for _, f := range filters {
+		msgs, ferr := store.GetRawMessagesForFilter(f.ID)
+		if ferr != nil {
+			continue
+		}
+		for _, msg := range msgs {
+			matched, reason, confidence, triageErr := triage.TriageMessage(msg.Body, f.Prompt)
+			if triageErr != nil {
+				continue
+			}
+			if matched {
+				matchJSON, saveErr := store.SaveMatch(SaveMatchParams{
+					FilterID:        f.ID,
+					MessageID:       msg.MessageID,
+					SenderJID:       msg.SenderJID,
+					ChatJID:         msg.ChatJID,
+					ChatName:        msg.ChatName,
+					SenderName:      msg.SenderName,
+					Body:            msg.Body,
+					ReceivedAt:      msg.ReceivedAt,
+					RelevanceReason: reason,
+					Confidence:      confidence,
+				})
+				if saveErr == nil && callback != nil {
+					callback.OnMessage(matchJSON)
+				}
+			}
+		}
+	}
+
+	return len(collected), nil
+}
+
+// TriageStoredMessages runs a filter against all raw messages that haven't been
+// matched yet. Called when a new filter is created so users immediately see
+// historical messages that match it.
+func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
+	filter, err := store.getFilter(filterID)
+	if err != nil {
+		return 0, fmt.Errorf("filter not found: %w", err)
+	}
+
+	msgs, err := store.GetRawMessagesForFilter(filterID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to load raw messages: %w", err)
+	}
+	if len(msgs) == 0 {
+		return 0, nil
+	}
+
+	triage := NewTriageClient(claudeApiKey, "")
+	matched := 0
+	for _, msg := range msgs {
+		ok, reason, confidence, triageErr := triage.TriageMessage(msg.Body, filter.Prompt)
+		if triageErr != nil {
+			continue
+		}
+		if ok {
+			matchJSON, saveErr := store.SaveMatch(SaveMatchParams{
+				FilterID:        filter.ID,
+				MessageID:       msg.MessageID,
+				SenderJID:       msg.SenderJID,
+				ChatJID:         msg.ChatJID,
+				ChatName:        msg.ChatName,
+				SenderName:      msg.SenderName,
+				Body:            msg.Body,
+				ReceivedAt:      msg.ReceivedAt,
+				RelevanceReason: reason,
+				Confidence:      confidence,
+			})
+			if saveErr == nil {
+				matched++
+				if callback != nil {
+					callback.OnMessage(matchJSON)
+				}
+			}
+		}
+	}
+	return matched, nil
+}
+
 // SyncAndTriage connects to WhatsApp, collects messages, runs AI triage, then disconnects.
 // It returns the number of messages that were processed (not just matched).
 func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
@@ -160,36 +369,37 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	collected := make([]rawMsg, 0, 64)
 
 	wac.AddEventHandler(func(evt interface{}) {
-		switch v := evt.(type) {
-		case *events.Message:
-			if v.Info.IsFromMe {
-				return
-			}
-			if v.Message == nil {
-				return
-			}
-			// Filter out protocol messages
-			if v.Message.GetProtocolMessage() != nil {
-				return
-			}
-			body := extractBody(v)
-			if body == "" {
-				return
-			}
-			ts := v.Info.Timestamp.Unix()
-			if ts <= lastSyncTimestamp {
-				return
-			}
-			mu.Lock()
-			collected = append(collected, rawMsg{
-				msgID:     v.Info.ID,
-				senderJID: v.Info.Sender.String(),
-				chatJID:   v.Info.Chat.String(),
-				body:      body,
-				timestamp: ts,
-			})
-			mu.Unlock()
+		v, ok := evt.(*events.Message)
+		if !ok {
+			return
 		}
+		if v.Info.IsFromMe {
+			return
+		}
+		if v.Message == nil {
+			return
+		}
+		// Filter out protocol messages
+		if v.Message.GetProtocolMessage() != nil {
+			return
+		}
+		body := extractBodyFromMsg(v.Message)
+		if body == "" {
+			return
+		}
+		ts := v.Info.Timestamp.Unix()
+		if ts <= lastSyncTimestamp {
+			return
+		}
+		mu.Lock()
+		collected = append(collected, rawMsg{
+			msgID:     v.Info.ID,
+			senderJID: v.Info.Sender.String(),
+			chatJID:   v.Info.Chat.String(),
+			body:      body,
+			timestamp: ts,
+		})
+		mu.Unlock()
 	})
 
 	if err := wac.Connect(); err != nil {
@@ -263,22 +473,28 @@ func (c *Client) Unlink() error {
 	return deviceStore.Delete(ctx)
 }
 
-// extractBody pulls the text body out of a WhatsApp message.
-func extractBody(evt *events.Message) string {
-	if evt.Message == nil {
+// extractBodyFromMsg pulls the text body out of a WhatsApp message proto.
+// Accepts the inner *waE2E.Message type shared by both live events and history sync.
+func extractBodyFromMsg(msg *waE2E.Message) string {
+	if msg == nil {
 		return ""
 	}
-	if c := evt.Message.GetConversation(); c != "" {
+	if c := msg.GetConversation(); c != "" {
 		return c
 	}
-	if ext := evt.Message.GetExtendedTextMessage(); ext != nil {
+	if ext := msg.GetExtendedTextMessage(); ext != nil {
 		return ext.GetText()
 	}
-	if img := evt.Message.GetImageMessage(); img != nil {
+	if img := msg.GetImageMessage(); img != nil {
 		return img.GetCaption()
 	}
-	if vid := evt.Message.GetVideoMessage(); vid != nil {
+	if vid := msg.GetVideoMessage(); vid != nil {
 		return vid.GetCaption()
 	}
 	return ""
+}
+
+// extractBody is kept for compatibility with the existing SyncAndTriage call site.
+func extractBody(evt *events.Message) string {
+	return extractBodyFromMsg(evt.Message)
 }
