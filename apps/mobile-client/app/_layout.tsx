@@ -1,14 +1,31 @@
 import { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { useAppStore } from '../src/stores/appStore';
 
 export default function RootLayout() {
   const { initialize, retryInit, isInitialized, initError, isLinked } = useAppStore();
+  const router = useRouter();
+  const segments = useSegments();
 
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  // Once initialized, enforce navigation protection via redirect (not conditional Stack.Screen
+  // rendering — passing React.Fragment as a Stack child causes expo-router's mapProtectedScreen
+  // to coerce Symbol(react.fragment) to string → "TypeError: Cannot convert Symbol to string").
+  useEffect(() => {
+    if (!isInitialized || initError) return;
+
+    const inLinkScreen = segments[0] === 'link-whatsapp';
+
+    if (!isLinked && !inLinkScreen) {
+      router.replace('/link-whatsapp');
+    } else if (isLinked && inLinkScreen) {
+      router.replace('/(tabs)');
+    }
+  }, [isInitialized, initError, isLinked, segments, router]);
 
   // Still initializing — show splash
   if (!isInitialized && !initError) {
@@ -41,18 +58,24 @@ export default function RootLayout() {
     );
   }
 
+  // Always render all screens statically — navigation protection is handled by the
+  // useEffect above, not by conditionally rendering Stack.Screen children.
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      {!isLinked ? (
-        <Stack.Screen name="link-whatsapp" />
-      ) : (
-        <>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="filters/new" options={{ presentation: 'modal', headerShown: true, title: 'New Filter' }} />
-          <Stack.Screen name="filters/[id]" options={{ presentation: 'modal', headerShown: true, title: 'Edit Filter' }} />
-          <Stack.Screen name="settings" options={{ presentation: 'modal', headerShown: true, title: 'Settings' }} />
-        </>
-      )}
+      <Stack.Screen name="link-whatsapp" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen
+        name="filters/new"
+        options={{ presentation: 'modal', headerShown: true, title: 'New Filter' }}
+      />
+      <Stack.Screen
+        name="filters/[id]"
+        options={{ presentation: 'modal', headerShown: true, title: 'Edit Filter' }}
+      />
+      <Stack.Screen
+        name="settings"
+        options={{ presentation: 'modal', headerShown: true, title: 'Settings' }}
+      />
     </Stack>
   );
 }
