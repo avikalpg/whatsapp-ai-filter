@@ -69,7 +69,14 @@ type triageResult struct {
 
 // TriageMessage asks Claude whether msg is relevant to the filter description.
 // Returns: relevant, reason, confidence, error.
+//
+// Special prompt: if filterDescription is exactly "*", the message always matches
+// without making any API call. This is used by the built-in "All Messages" filter.
 func (t *TriageClient) TriageMessage(msg, filterDescription string) (bool, string, float64, error) {
+	if strings.TrimSpace(filterDescription) == "*" {
+		return true, "Matches all messages", 1.0, nil
+	}
+
 	if t.authToken == "" {
 		return false, "", 0, fmt.Errorf("auth token not set")
 	}

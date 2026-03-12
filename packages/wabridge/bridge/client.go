@@ -11,6 +11,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -27,12 +29,20 @@ type Client struct {
 	store   *Store
 	waStore *sqlstore.Container
 
-	// pairingClient is held open after StartPairing returns the code.
-	// WhatsApp needs the WebSocket connection to remain alive so it can
-	// send the PairSuccess event back when the user enters the code.
-	// IsLinked() checks whether pairing completed and cleans it up.
+	// pairingClient is kept alive after StartPairing() returns the pairing code.
+	// WhatsApp needs this WebSocket to deliver PairSuccess AND the subsequent
+	// INITIAL_BOOTSTRAP HistorySync events (first 90 days of messages).
+	//
+	// The HistorySync handler is registered on this client in StartPairing() so
+	// messages are captured on the correct (first) connection.
+	// SyncHistory() waits for historyCh to be signalled, then triages raw messages.
 	pairingClient *whatsmeow.Client
 	pairingMu     sync.Mutex
+
+	// historyCh is closed when the pairingClient has finished receiving
+	// HistorySync events (progress=100) or the 60-second timeout fires.
+	historyCh   chan struct{}
+	historyOnce sync.Once
 }
 
 // NewClient creates a new Client using the given dbPath for the whatsmeow SQLite device store.
@@ -40,11 +50,6 @@ func NewClient(dbPath string, store *Store) (*Client, error) {
 	logger := waLog.Stdout("wabridge", "WARN", true)
 	ctx := context.Background()
 
-	// Open the raw DB first so we can apply PRAGMA foreign_keys = ON before
-	// sqlstore.Upgrade() runs (it returns an error if FK are not enabled).
-	// We do NOT use a "file:..." URI here: go-sqlite3 on Android gomobile builds
-	// may not have SQLITE_OPEN_URI compiled in, so "file:/path?..." is treated
-	// as a literal filename that doesn't exist.
 	rawDB, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite db: %w", err)
@@ -61,49 +66,27 @@ func NewClient(dbPath string, store *Store) (*Client, error) {
 		return nil, fmt.Errorf("failed to upgrade whatsmeow store: %w", err)
 	}
 	return &Client{
-		dbPath:  dbPath,
-		store:   store,
-		waStore: container,
+		dbPath:    dbPath,
+		store:     store,
+		waStore:   container,
+		historyCh: make(chan struct{}),
 	}, nil
-}
-
-// IsLinked returns true if there is at least one device stored.
-// It also checks whether an in-progress pairing has completed: whatsmeow
-// sets client.Store.ID once WhatsApp delivers the PairSuccess event.
-// When pairing completes, the pairing connection is disconnected and released.
-func (c *Client) IsLinked() bool {
-	c.pairingMu.Lock()
-	if c.pairingClient != nil {
-		if c.pairingClient.Store.ID != nil {
-			// Pairing succeeded — WhatsApp saved credentials to the DB.
-			c.pairingClient.Disconnect()
-			c.pairingClient = nil
-			c.pairingMu.Unlock()
-			return true
-		}
-		c.pairingMu.Unlock()
-		return false
-	}
-	c.pairingMu.Unlock()
-
-	ctx := context.Background()
-	devices, err := c.waStore.GetAllDevices(ctx)
-	if err != nil {
-		return false
-	}
-	return len(devices) > 0
 }
 
 // StartPairing initiates a phone-number pairing flow.
 // phoneNumber should be in E.164 format (with or without leading +).
 //
-// IMPORTANT: this function returns the pairing code but does NOT disconnect.
-// The WebSocket connection must stay alive so WhatsApp can deliver the
-// PairSuccess event when the user enters the code on their phone.
-// Call IsLinked() to poll for completion; it cleans up the connection once
-// WhatsApp confirms the link (client.Store.ID is set by whatsmeow).
+// The connection is kept alive after this returns so WhatsApp can deliver:
+//  1. PairSuccess — signals that the user entered the code
+//  2. HistorySync (INITIAL_BOOTSTRAP) — the last ~90 days of messages
+//
+// HistorySync events are saved directly to waci_raw_messages on this connection,
+// because WhatsApp only sends INITIAL_BOOTSTRAP once, on the very first connection
+// after pairing. A second connection gets only RECENT (last ~30 messages).
+//
+// Call IsLinked() to poll for pairing completion.
+// Call SyncHistory() to wait for HistorySync to finish and run filter triage.
 func (c *Client) StartPairing(phoneNumber string) (string, error) {
-	// Strip leading + — whatsmeow PairPhone does not accept it
 	phone := strings.TrimPrefix(phoneNumber, "+")
 
 	ctx := context.Background()
@@ -115,6 +98,62 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 	logger := waLog.Stdout("wabridge-client", "WARN", true)
 	client := whatsmeow.NewClient(deviceStore, logger)
 
+	// Register HistorySync handler BEFORE connecting so no events are missed.
+	// Messages are saved directly to waci_raw_messages as they arrive.
+	client.AddEventHandler(func(evt interface{}) {
+		v, ok := evt.(*events.HistorySync)
+		if !ok {
+			return
+		}
+		syncType := v.Data.GetSyncType()
+		if syncType != waHistorySync.HistorySync_INITIAL_BOOTSTRAP &&
+			syncType != waHistorySync.HistorySync_FULL &&
+			syncType != waHistorySync.HistorySync_RECENT {
+			return
+		}
+		for _, conv := range v.Data.GetConversations() {
+			chatJID := conv.GetID()
+			chatName := conv.GetName()
+			if chatName == "" {
+				chatName = chatJID
+			}
+			for _, histMsg := range conv.GetMessages() {
+				webMsg := histMsg.GetMessage()
+				if webMsg == nil {
+					continue
+				}
+				key := webMsg.GetKey()
+				if key == nil || key.GetFromMe() {
+					continue
+				}
+				body := extractBodyFromMsg(webMsg.GetMessage())
+				if body == "" {
+					continue
+				}
+				senderJID := key.GetParticipant()
+				if senderJID == "" {
+					senderJID = chatJID
+				}
+				senderName := webMsg.GetPushName()
+				if senderName == "" {
+					senderName = senderJID
+				}
+				_ = c.store.SaveRawMessage(RawMessage{
+					MessageID:  key.GetID(),
+					SenderJID:  senderJID,
+					ChatJID:    chatJID,
+					ChatName:   chatName,
+					SenderName: senderName,
+					Body:       body,
+					ReceivedAt: int64(webMsg.GetMessageTimestamp()),
+				})
+			}
+		}
+		if v.Data.GetProgress() >= 100 {
+			c.historyOnce.Do(func() { close(c.historyCh) })
+		}
+	})
+
 	if err := client.Connect(); err != nil {
 		return "", fmt.Errorf("failed to connect for pairing: %w", err)
 	}
@@ -125,10 +164,9 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 		return "", fmt.Errorf("failed to pair phone: %w", err)
 	}
 
-	// Keep the connection alive — WhatsApp will send PairSuccess over this socket.
 	c.pairingMu.Lock()
 	if c.pairingClient != nil {
-		c.pairingClient.Disconnect() // clean up any stale previous attempt
+		c.pairingClient.Disconnect()
 	}
 	c.pairingClient = client
 	c.pairingMu.Unlock()
@@ -136,8 +174,229 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 	return code, nil
 }
 
-// SyncAndTriage connects to WhatsApp, collects messages, runs AI triage, then disconnects.
-// It returns the number of messages that were processed (not just matched).
+// IsLinked returns true if there is a stored WhatsApp session.
+//
+// While pairing is in progress, it checks whether whatsmeow has set Store.ID
+// (which happens on PairSuccess). NOTE: we intentionally do NOT disconnect
+// the pairingClient here — it must stay alive to receive HistorySync events.
+// SyncHistory() is responsible for disconnecting it after history is collected.
+func (c *Client) IsLinked() bool {
+	c.pairingMu.Lock()
+	if c.pairingClient != nil {
+		linked := c.pairingClient.Store.ID != nil
+		c.pairingMu.Unlock()
+		return linked
+	}
+	c.pairingMu.Unlock()
+
+	ctx := context.Background()
+	devices, err := c.waStore.GetAllDevices(ctx)
+	if err != nil {
+		return false
+	}
+	return len(devices) > 0
+}
+
+// SyncHistory waits for the pairingClient to finish receiving HistorySync events,
+// then runs all saved filters against the accumulated raw messages.
+//
+// If the pairingClient is no longer available (e.g. app was restarted after pairing),
+// it opens a fresh connection to catch any RECENT sync events and triages what's stored.
+//
+// After this call the pairingClient is disconnected and released.
+func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
+	c.pairingMu.Lock()
+	pc := c.pairingClient
+	c.pairingMu.Unlock()
+
+	if pc != nil {
+		// pairingClient is alive and has the HistorySync handler registered.
+		// Wait for WhatsApp to finish delivering history (progress=100) or timeout.
+		select {
+		case <-c.historyCh:
+			// History sync completed normally.
+		case <-time.After(60 * time.Second):
+			// Timeout — process whatever arrived so far.
+			c.historyOnce.Do(func() { close(c.historyCh) })
+		}
+		// Disconnect the pairingClient now that history is collected.
+		c.pairingMu.Lock()
+		if c.pairingClient != nil {
+			c.pairingClient.Disconnect()
+			c.pairingClient = nil
+		}
+		c.pairingMu.Unlock()
+	} else {
+		// No pairingClient (app restarted, or called a second time).
+		// Open a fresh connection; WhatsApp will send RECENT sync on reconnect
+		// which catches any messages since the last session.
+		ctx := context.Background()
+		deviceStore, err := c.waStore.GetFirstDevice(ctx)
+		if err != nil || deviceStore == nil {
+			// No device — nothing to sync; just triage whatever is already stored.
+			return c.triageAllFilters(store, claudeApiKey, callback)
+		}
+		logger := waLog.Stdout("wabridge-history", "WARN", true)
+		wac := whatsmeow.NewClient(deviceStore, logger)
+
+		recentDone := make(chan struct{}, 1)
+		var recentOnce sync.Once
+		wac.AddEventHandler(func(evt interface{}) {
+			v, ok := evt.(*events.HistorySync)
+			if !ok {
+				return
+			}
+			syncType := v.Data.GetSyncType()
+			if syncType != waHistorySync.HistorySync_RECENT &&
+				syncType != waHistorySync.HistorySync_FULL {
+				return
+			}
+			for _, conv := range v.Data.GetConversations() {
+				chatJID := conv.GetID()
+				chatName := conv.GetName()
+				if chatName == "" {
+					chatName = chatJID
+				}
+				for _, histMsg := range conv.GetMessages() {
+					webMsg := histMsg.GetMessage()
+					if webMsg == nil {
+						continue
+					}
+					key := webMsg.GetKey()
+					if key == nil || key.GetFromMe() {
+						continue
+					}
+					body := extractBodyFromMsg(webMsg.GetMessage())
+					if body == "" {
+						continue
+					}
+					senderJID := key.GetParticipant()
+					if senderJID == "" {
+						senderJID = chatJID
+					}
+					senderName := webMsg.GetPushName()
+					if senderName == "" {
+						senderName = senderJID
+					}
+					_ = store.SaveRawMessage(RawMessage{
+						MessageID:  key.GetID(),
+						SenderJID:  senderJID,
+						ChatJID:    chatJID,
+						ChatName:   chatName,
+						SenderName: senderName,
+						Body:       body,
+						ReceivedAt: int64(webMsg.GetMessageTimestamp()),
+					})
+				}
+			}
+			if v.Data.GetProgress() >= 100 {
+				recentOnce.Do(func() { close(recentDone) })
+			}
+		})
+		if err := wac.Connect(); err == nil {
+			select {
+			case <-recentDone:
+			case <-time.After(30 * time.Second):
+			}
+			wac.Disconnect()
+		}
+	}
+
+	return c.triageAllFilters(store, claudeApiKey, callback)
+}
+
+// triageAllFilters runs every filter against its unmatched raw messages.
+func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
+	filters, err := store.listFilters()
+	if err != nil {
+		return 0, fmt.Errorf("failed to load filters: %w", err)
+	}
+	rawCount, _ := store.RawMessageCount()
+	triage := NewTriageClient(claudeApiKey, "")
+	totalMatched := 0
+	for _, f := range filters {
+		msgs, ferr := store.GetRawMessagesForFilter(f.ID)
+		if ferr != nil {
+			continue
+		}
+		for _, msg := range msgs {
+			matched, reason, confidence, triageErr := triage.TriageMessage(msg.Body, f.Prompt)
+			if triageErr != nil {
+				continue
+			}
+			if matched {
+				matchJSON, saveErr := store.SaveMatch(SaveMatchParams{
+					FilterID:        f.ID,
+					MessageID:       msg.MessageID,
+					SenderJID:       msg.SenderJID,
+					ChatJID:         msg.ChatJID,
+					ChatName:        msg.ChatName,
+					SenderName:      msg.SenderName,
+					Body:            msg.Body,
+					ReceivedAt:      msg.ReceivedAt,
+					RelevanceReason: reason,
+					Confidence:      confidence,
+				})
+				if saveErr == nil {
+					totalMatched++
+					if callback != nil {
+						callback.OnMessage(matchJSON)
+					}
+				}
+			}
+		}
+	}
+	_ = rawCount
+	return totalMatched, nil
+}
+
+// TriageStoredMessages runs a single filter against all raw messages not yet
+// matched by it. Called when a new filter is created so users see historical
+// messages immediately.
+func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
+	filter, err := store.getFilter(filterID)
+	if err != nil {
+		return 0, fmt.Errorf("filter not found: %w", err)
+	}
+	msgs, err := store.GetRawMessagesForFilter(filterID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to load raw messages: %w", err)
+	}
+	if len(msgs) == 0 {
+		return 0, nil
+	}
+	triage := NewTriageClient(claudeApiKey, "")
+	matched := 0
+	for _, msg := range msgs {
+		ok, reason, confidence, triageErr := triage.TriageMessage(msg.Body, filter.Prompt)
+		if triageErr != nil {
+			continue
+		}
+		if ok {
+			matchJSON, saveErr := store.SaveMatch(SaveMatchParams{
+				FilterID:        filter.ID,
+				MessageID:       msg.MessageID,
+				SenderJID:       msg.SenderJID,
+				ChatJID:         msg.ChatJID,
+				ChatName:        msg.ChatName,
+				SenderName:      msg.SenderName,
+				Body:            msg.Body,
+				ReceivedAt:      msg.ReceivedAt,
+				RelevanceReason: reason,
+				Confidence:      confidence,
+			})
+			if saveErr == nil {
+				matched++
+				if callback != nil {
+					callback.OnMessage(matchJSON)
+				}
+			}
+		}
+	}
+	return matched, nil
+}
+
+// SyncAndTriage connects to WhatsApp, collects live messages, runs AI triage, then disconnects.
 func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
 	ctx := context.Background()
 	deviceStore, err := c.waStore.GetFirstDevice(ctx)
@@ -148,7 +407,6 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	logger := waLog.Stdout("wabridge-sync", "WARN", true)
 	wac := whatsmeow.NewClient(deviceStore, logger)
 
-	// Collect messages from the event handler goroutine into a mutex-protected slice.
 	type rawMsg struct {
 		msgID     string
 		senderJID string
@@ -160,36 +418,33 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	collected := make([]rawMsg, 0, 64)
 
 	wac.AddEventHandler(func(evt interface{}) {
-		switch v := evt.(type) {
-		case *events.Message:
-			if v.Info.IsFromMe {
-				return
-			}
-			if v.Message == nil {
-				return
-			}
-			// Filter out protocol messages
-			if v.Message.GetProtocolMessage() != nil {
-				return
-			}
-			body := extractBody(v)
-			if body == "" {
-				return
-			}
-			ts := v.Info.Timestamp.Unix()
-			if ts <= lastSyncTimestamp {
-				return
-			}
-			mu.Lock()
-			collected = append(collected, rawMsg{
-				msgID:     v.Info.ID,
-				senderJID: v.Info.Sender.String(),
-				chatJID:   v.Info.Chat.String(),
-				body:      body,
-				timestamp: ts,
-			})
-			mu.Unlock()
+		v, ok := evt.(*events.Message)
+		if !ok {
+			return
 		}
+		if v.Info.IsFromMe || v.Message == nil {
+			return
+		}
+		if v.Message.GetProtocolMessage() != nil {
+			return
+		}
+		body := extractBodyFromMsg(v.Message)
+		if body == "" {
+			return
+		}
+		ts := v.Info.Timestamp.Unix()
+		if ts <= lastSyncTimestamp {
+			return
+		}
+		mu.Lock()
+		collected = append(collected, rawMsg{
+			msgID:     v.Info.ID,
+			senderJID: v.Info.Sender.String(),
+			chatJID:   v.Info.Chat.String(),
+			body:      body,
+			timestamp: ts,
+		})
+		mu.Unlock()
 	})
 
 	if err := wac.Connect(); err != nil {
@@ -197,30 +452,24 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	}
 	defer wac.Disconnect()
 
-	// Wait up to 30 seconds for history sync / live messages, then disconnect
-	// so the event handler is stopped before we read `collected`.
 	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	<-syncCtx.Done()
-	wac.Disconnect() // explicit disconnect stops event handler before we read collected
+	wac.Disconnect()
 
 	if len(collected) == 0 {
 		return 0, nil
 	}
 
-	// Load all filters
 	filters, err := store.listFilters()
 	if err != nil {
 		return len(collected), fmt.Errorf("failed to load filters: %w", err)
 	}
-
 	triage := NewTriageClient(claudeApiKey, "")
-
 	for _, msg := range collected {
 		for _, f := range filters {
 			matched, reason, confidence, err := triage.TriageMessage(msg.body, f.Prompt)
 			if err != nil {
-				// Skip on error but continue
 				continue
 			}
 			if matched {
@@ -229,7 +478,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 					MessageID:       msg.msgID,
 					SenderJID:       msg.senderJID,
 					ChatJID:         msg.chatJID,
-					ChatName:        msg.chatJID, // best effort; whatsmeow pushgroups fill this later
+					ChatName:        msg.chatJID,
 					SenderName:      msg.senderJID,
 					Body:            msg.body,
 					ReceivedAt:      msg.timestamp,
@@ -242,7 +491,6 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 			}
 		}
 	}
-
 	return len(collected), nil
 }
 
@@ -251,34 +499,38 @@ func (c *Client) Unlink() error {
 	ctx := context.Background()
 	deviceStore, err := c.waStore.GetFirstDevice(ctx)
 	if err != nil || deviceStore == nil {
-		return nil // nothing to unlink
+		return nil
 	}
 	logger := waLog.Stdout("wabridge-unlink", "WARN", true)
 	wac := whatsmeow.NewClient(deviceStore, logger)
 	if err := wac.Connect(); err == nil {
-		logoutCtx := context.Background()
-		wac.Logout(logoutCtx)
+		wac.Logout(context.Background())
 		wac.Disconnect()
 	}
 	return deviceStore.Delete(ctx)
 }
 
-// extractBody pulls the text body out of a WhatsApp message.
-func extractBody(evt *events.Message) string {
-	if evt.Message == nil {
+// extractBodyFromMsg pulls the text body out of a WhatsApp message proto.
+func extractBodyFromMsg(msg *waE2E.Message) string {
+	if msg == nil {
 		return ""
 	}
-	if c := evt.Message.GetConversation(); c != "" {
+	if c := msg.GetConversation(); c != "" {
 		return c
 	}
-	if ext := evt.Message.GetExtendedTextMessage(); ext != nil {
+	if ext := msg.GetExtendedTextMessage(); ext != nil {
 		return ext.GetText()
 	}
-	if img := evt.Message.GetImageMessage(); img != nil {
+	if img := msg.GetImageMessage(); img != nil {
 		return img.GetCaption()
 	}
-	if vid := evt.Message.GetVideoMessage(); vid != nil {
+	if vid := msg.GetVideoMessage(); vid != nil {
 		return vid.GetCaption()
 	}
 	return ""
+}
+
+// extractBody retained for call-site compatibility.
+func extractBody(evt *events.Message) string {
+	return extractBodyFromMsg(evt.Message)
 }

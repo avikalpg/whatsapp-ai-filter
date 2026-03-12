@@ -41,6 +41,18 @@ type FilterMatch struct {
 	CreatedAt       int64   `json:"created_at"`
 }
 
+// RawMessage is a message stored during history sync, independent of any filter.
+// When the user creates a new filter later, we triage these raw messages against it.
+type RawMessage struct {
+	MessageID  string `json:"message_id"`
+	SenderJID  string `json:"sender_jid"`
+	ChatJID    string `json:"chat_jid"`
+	ChatName   string `json:"chat_name"`
+	SenderName string `json:"sender_name"`
+	Body       string `json:"body"`
+	ReceivedAt int64  `json:"received_at"`
+}
+
 // SaveMatchParams holds parameters for creating a new filter match.
 type SaveMatchParams struct {
 	FilterID        string
@@ -119,8 +131,34 @@ CREATE TABLE IF NOT EXISTS waci_sync_state (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS waci_raw_messages (
+  message_id  TEXT    PRIMARY KEY,
+  sender_jid  TEXT    NOT NULL,
+  chat_jid    TEXT    NOT NULL,
+  chat_name   TEXT    NOT NULL,
+  sender_name TEXT    NOT NULL,
+  body        TEXT    NOT NULL,
+  received_at INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL
+);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Seed the built-in "All Messages" filter exactly once.
+	// Tracked via sync_state so a user who deletes it doesn't see it reappear.
+	var seeded int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filter_seeded'`).Scan(&seeded)
+	if seeded == 0 {
+		_, _ = s.db.Exec(`
+INSERT INTO waci_filters (id, name, prompt, created_at, updated_at)
+VALUES ('flt_default_all', 'All Messages', '*', strftime('%s','now'), strftime('%s','now'))
+`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filter_seeded', '1')`)
+	}
+	return nil
 }
 
 // listFilters returns all filters (internal use).
@@ -268,4 +306,58 @@ func (s *Store) GetSyncState(key string) (string, error) {
 func (s *Store) SetSyncState(key, value string) error {
 	_, err := s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
+}
+
+// SaveRawMessage stores a message from history sync for later triage.
+// Uses INSERT OR IGNORE so re-syncing is idempotent.
+func (s *Store) SaveRawMessage(m RawMessage) error {
+	_, err := s.db.Exec(`
+INSERT OR IGNORE INTO waci_raw_messages
+  (message_id, sender_jid, chat_jid, chat_name, sender_name, body, received_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`, m.MessageID, m.SenderJID, m.ChatJID, m.ChatName, m.SenderName, m.Body, m.ReceivedAt, time.Now().Unix())
+	return err
+}
+
+// GetRawMessagesForFilter returns all raw messages that have NOT yet been
+// matched against filterID. Used when a new filter is created so we can
+// retroactively triage stored history.
+func (s *Store) GetRawMessagesForFilter(filterID string) ([]RawMessage, error) {
+	rows, err := s.db.Query(`
+SELECT r.message_id, r.sender_jid, r.chat_jid, r.chat_name, r.sender_name, r.body, r.received_at
+FROM waci_raw_messages r
+WHERE NOT EXISTS (
+    SELECT 1 FROM waci_filter_matches m
+    WHERE m.message_id = r.message_id AND m.filter_id = ?
+)
+ORDER BY r.received_at DESC
+`, filterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RawMessage
+	for rows.Next() {
+		var m RawMessage
+		if err := rows.Scan(&m.MessageID, &m.SenderJID, &m.ChatJID, &m.ChatName, &m.SenderName, &m.Body, &m.ReceivedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// getFilter returns a single filter by ID.
+func (s *Store) getFilter(id string) (Filter, error) {
+	var f Filter
+	err := s.db.QueryRow(`SELECT id, name, prompt, created_at, updated_at FROM waci_filters WHERE id = ?`, id).
+		Scan(&f.ID, &f.Name, &f.Prompt, &f.CreatedAt, &f.UpdatedAt)
+	return f, err
+}
+
+// RawMessageCount returns the number of raw messages stored from history sync.
+func (s *Store) RawMessageCount() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM waci_raw_messages`).Scan(&count)
+	return count, err
 }

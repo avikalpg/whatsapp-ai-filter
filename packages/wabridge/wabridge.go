@@ -98,6 +98,46 @@ func (b *Bridge) GetMatches(filterId string, limit int) (string, error) {
 	return b.store.GetMatches(filterId, limit)
 }
 
+// TriageStoredMessages runs a filter against all raw messages stored from previous
+// history syncs, creating matches for any that pass the filter.
+//
+// Call this immediately after creating a new filter so users see historical
+// messages that match it, even if the filter didn't exist at sync time.
+func (b *Bridge) TriageStoredMessages(filterID string, callback MessageCallback) (*SyncResult, error) {
+	var cb bridge.MessageCallback
+	if callback != nil {
+		cb = &messageCallbackAdapter{callback}
+	}
+	matched, err := b.internal.TriageStoredMessages(filterID, b.store, b.claudeApiKey, cb)
+	result := &SyncResult{MessagesSynced: matched}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result, nil
+}
+
+// StartHistorySync connects to WhatsApp, collects the HistorySync messages
+// delivered on first connection (up to 90 days), runs AI triage against all
+// saved filters, and disconnects.
+//
+// The built-in "All Messages" filter (prompt = "*") matches every message
+// without making any API call, so it's safe to call immediately after pairing.
+//
+// Matched messages are persisted locally and also delivered via callback.
+// Returns the number of raw messages processed (not just matched).
+func (b *Bridge) StartHistorySync(callback MessageCallback) (*SyncResult, error) {
+	var cb bridge.MessageCallback
+	if callback != nil {
+		cb = &messageCallbackAdapter{callback}
+	}
+	synced, err := b.internal.SyncHistory(b.store, b.claudeApiKey, cb)
+	result := &SyncResult{MessagesSynced: synced}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result, nil
+}
+
 // Unlink removes the stored WhatsApp session (logout).
 func (b *Bridge) Unlink() error {
 	return b.internal.Unlink()
