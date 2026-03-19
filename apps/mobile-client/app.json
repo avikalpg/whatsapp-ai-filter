@@ -15,7 +15,6 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.alokit.waci",
       "adaptiveIcon": {
         "backgroundColor": "#E5FAEF",
         "foregroundImage": "./assets/android-icon-foreground.png",
