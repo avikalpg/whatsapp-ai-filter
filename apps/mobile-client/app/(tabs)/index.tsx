@@ -46,36 +46,8 @@ export default function InboxScreen() {
     await loadAll();
   };
 
-<<<<<<< HEAD
-  const handleOpenMessage = (item: FilterMatch) => {
-    const chatJID = item.chat_jid;
-    if (!chatJID) return;
-
-    if (chatJID.endsWith('@g.us')) {
-      // Groups: no reliable public deep link — inform the user.
-      Alert.alert(
-        'Group message',
-        'Opening a specific group chat directly isn\'t supported yet. Open WhatsApp and find the group manually.',
-        [{ text: 'OK' }],
-      );
-      return;
-    }
-
-    // Individual chat (DM): use sender_jid to get the contact's phone number.
-    // For DMs, sender_jid is the person you're chatting with.
-    const senderJID = item.sender_jid;
-    const phone = senderJID.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
-    if (!phone) return;
-
-    // wa.me opens the conversation in WhatsApp (works on Android + iOS).
-    Linking.openURL(`https://wa.me/${phone}`).catch(() => {
-      Alert.alert('Error', 'Could not open WhatsApp. Make sure it is installed.');
-    });
-=======
-  const handleFilterPress = (filter: Filter) => {
-    router.push(`/filters/${filter.id}`);
->>>>>>> 88be7e7 (feat(inbox): show filters instead of messages; add All DMs and DMs from Contacts default filters)
-  };
+const handleFilterPress = (filter: Filter) => {
+    router.push(`/filters/${filter.id}`);  };
 
   const getMatchCount = (filterId: string): number => {
     return matches[filterId]?.length ?? 0;
