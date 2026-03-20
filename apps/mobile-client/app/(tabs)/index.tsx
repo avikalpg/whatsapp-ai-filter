@@ -47,7 +47,7 @@ export default function InboxScreen() {
   };
 
 const handleFilterPress = (filter: Filter) => {
-    router.push(`/filters/${filter.id}`);  };
+    router.push(`/filters/${filter.id}/messages`);  };
 
   const getMatchCount = (filterId: string): number => {
     return matches[filterId]?.length ?? 0;

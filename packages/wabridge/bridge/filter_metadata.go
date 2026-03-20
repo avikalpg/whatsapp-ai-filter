@@ -6,36 +6,42 @@ import (
 
 // shouldProcessMessage checks if a message should be processed based on filter options.
 // Returns (shouldProcess bool, skipReason string).
-// This implements the same filtering logic as the core implementation.
-func shouldProcessMessage(filter Filter, chatJID string) (bool, string) {
+// This implements granular DM/group filtering logic.
+func shouldProcessMessage(filter Filter, chatJID string, senderJID string) (bool, string) {
 	isGroup := strings.HasSuffix(chatJID, "@g.us")
 
 	if isGroup {
 		// Group message
-		if len(filter.GroupInclusionList) > 0 {
-			// If inclusion list is set, only process groups in that list
-			for _, id := range filter.GroupInclusionList {
+		if !filter.ProcessGroups {
+			return false, "group processing disabled"
+		}
+		if filter.GroupMode == "inclusion" {
+			// Inclusion mode: only process groups in the list
+			for _, id := range filter.GroupList {
 				if id == chatJID {
 					return true, ""
 				}
 			}
 			return false, "group not in inclusion list"
-		} else if len(filter.GroupExclusionList) > 0 {
-			// If exclusion list is set, skip groups in that list
-			for _, id := range filter.GroupExclusionList {
+		} else if filter.GroupMode == "exclusion" {
+			// Exclusion mode: skip groups in the list
+			for _, id := range filter.GroupList {
 				if id == chatJID {
 					return false, "group in exclusion list"
 				}
 			}
 			return true, ""
 		}
-		// No inclusion/exclusion list: process all groups
+		// No mode set: process all groups
 		return true, ""
 	} else {
 		// Direct message
-		if !filter.ProcessDirectMessages {
-			return false, "direct message processing disabled"
+		if !filter.ProcessDMs {
+			return false, "DM processing disabled"
 		}
+		// TODO: Check DM subcategories (contacts, businesses, etc.)
+		// For now, we process all DMs if ProcessDMs is true
+		// Future: check against WhatsApp contact list and business status
 		return true, ""
 	}
 }

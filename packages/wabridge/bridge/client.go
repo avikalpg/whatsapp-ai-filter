@@ -321,7 +321,7 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 		}
 		for _, msg := range msgs {
 			// Check if filter should process this message (DM/group options)
-			shouldProcess, _ := shouldProcessMessage(f, msg.ChatJID)
+			shouldProcess, _ := shouldProcessMessage(f, msg.ChatJID, msg.SenderJID)
 			if !shouldProcess {
 				continue
 			}
@@ -379,7 +379,7 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 	matched := 0
 	for _, msg := range msgs {
 		// Check if filter should process this message (DM/group options)
-		shouldProcess, _ := shouldProcessMessage(filter, msg.ChatJID)
+		shouldProcess, _ := shouldProcessMessage(filter, msg.ChatJID, msg.SenderJID)
 		if !shouldProcess {
 			continue
 		}
@@ -489,7 +489,7 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	for _, msg := range collected {
 		for _, f := range filters {
 			// Check if filter should process this message (DM/group options)
-			shouldProcess, _ := shouldProcessMessage(f, msg.chatJID)
+			shouldProcess, _ := shouldProcessMessage(f, msg.chatJID, msg.senderJID)
 			if !shouldProcess {
 				continue
 			}

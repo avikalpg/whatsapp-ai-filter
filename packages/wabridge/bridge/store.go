@@ -17,14 +17,21 @@ type Store struct {
 
 // Filter represents a user-defined message filter.
 type Filter struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Prompt                string   `json:"prompt"`
-	ProcessDirectMessages bool     `json:"process_direct_messages"` // If false, skip all DMs
-	GroupInclusionList    []string `json:"group_inclusion_list"`    // If not empty, only process groups in this list
-	GroupExclusionList    []string `json:"group_exclusion_list"`    // If not empty, skip groups in this list
-	CreatedAt             int64    `json:"created_at"`
-	UpdatedAt             int64    `json:"updated_at"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Prompt          string   `json:"prompt"`
+	// DM options
+	ProcessDMs      bool     `json:"process_dms"`
+	DMContacts      bool     `json:"dm_contacts"`
+	DMNonContacts   bool     `json:"dm_non_contacts"`
+	DMBusinesses    bool     `json:"dm_businesses"`
+	DMNonBusinesses bool     `json:"dm_non_businesses"`
+	// Group options
+	ProcessGroups   bool     `json:"process_groups"`
+	GroupMode       string   `json:"group_mode"` // "inclusion", "exclusion", or empty
+	GroupList       []string `json:"group_list"`
+	CreatedAt       int64    `json:"created_at"`
+	UpdatedAt       int64    `json:"updated_at"`
 }
 
 // FilterMatch represents a message that matched a filter.
@@ -150,16 +157,21 @@ CREATE TABLE IF NOT EXISTS waci_raw_messages (
 		return err
 	}
 
-	// Migrate to schema v2: add filter options columns
-	var schemaV2 int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v2'`).Scan(&schemaV2)
-	if schemaV2 == 0 {
+	// Migrate to schema v3: granular DM/group options
+	var schemaV3 int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v3'`).Scan(&schemaV3)
+	if schemaV3 == 0 {
 		_, _ = s.db.Exec(`
-ALTER TABLE waci_filters ADD COLUMN process_direct_messages INTEGER DEFAULT 1;
-ALTER TABLE waci_filters ADD COLUMN group_inclusion_list TEXT DEFAULT '[]';
-ALTER TABLE waci_filters ADD COLUMN group_exclusion_list TEXT DEFAULT '[]';
+ALTER TABLE waci_filters ADD COLUMN process_dms INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_contacts INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_non_contacts INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_businesses INTEGER DEFAULT 0;
+ALTER TABLE waci_filters ADD COLUMN dm_non_businesses INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN process_groups INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN group_mode TEXT DEFAULT '';
+ALTER TABLE waci_filters ADD COLUMN group_list TEXT DEFAULT '[]';
 `)
-		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v2', '1')`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v3', '1')`)
 	}
 
 	// Seed the built-in default filters exactly once.
@@ -168,11 +180,16 @@ ALTER TABLE waci_filters ADD COLUMN group_exclusion_list TEXT DEFAULT '[]';
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filters_seeded_v2'`).Scan(&seeded)
 	if seeded == 0 {
 		_, _ = s.db.Exec(`
-INSERT INTO waci_filters (id, name, prompt, process_direct_messages, group_inclusion_list, group_exclusion_list, created_at, updated_at)
+INSERT INTO waci_filters (
+  id, name, prompt, 
+  process_dms, dm_contacts, dm_non_contacts, dm_businesses, dm_non_businesses,
+  process_groups, group_mode, group_list,
+  created_at, updated_at
+)
 VALUES 
-  ('flt_default_all', 'All Messages', '*', 1, '[]', '[]', strftime('%s','now'), strftime('%s','now')),
-  ('flt_default_dms', 'All DMs', '*:dm', 1, '[]', '[]', strftime('%s','now'), strftime('%s','now')),
-  ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', 1, '[]', '[]', strftime('%s','now'), strftime('%s','now'))
+  ('flt_default_all', 'All Messages', '*', 1, 1, 1, 0, 1, 1, '', '[]', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms', 'All DMs', '*:dm', 1, 1, 1, 0, 1, 0, '', '[]', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', 1, 1, 0, 0, 0, 0, '', '[]', strftime('%s','now'), strftime('%s','now'))
 `)
 		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v2', '1')`)
 	}
@@ -181,7 +198,14 @@ VALUES
 
 // listFilters returns all filters (internal use).
 func (s *Store) listFilters() ([]Filter, error) {
-	rows, err := s.db.Query(`SELECT id, name, prompt, process_direct_messages, group_inclusion_list, group_exclusion_list, created_at, updated_at FROM waci_filters ORDER BY created_at DESC`)
+	rows, err := s.db.Query(`
+		SELECT id, name, prompt, 
+		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1), 
+		       COALESCE(dm_businesses, 0), COALESCE(dm_non_businesses, 1),
+		       COALESCE(process_groups, 1), COALESCE(group_mode, ''), COALESCE(group_list, '[]'),
+		       created_at, updated_at 
+		FROM waci_filters ORDER BY created_at DESC
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -189,19 +213,25 @@ func (s *Store) listFilters() ([]Filter, error) {
 	var out []Filter
 	for rows.Next() {
 		var f Filter
-		var processDM int
-		var groupIncJSON, groupExcJSON string
-		if err := rows.Scan(&f.ID, &f.Name, &f.Prompt, &processDM, &groupIncJSON, &groupExcJSON, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups int
+		var groupListJSON string
+		if err := rows.Scan(
+			&f.ID, &f.Name, &f.Prompt,
+			&processDMs, &dmContacts, &dmNonContacts, &dmBusinesses, &dmNonBusinesses,
+			&processGroups, &f.GroupMode, &groupListJSON,
+			&f.CreatedAt, &f.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
-		f.ProcessDirectMessages = processDM == 1
-		_ = json.Unmarshal([]byte(groupIncJSON), &f.GroupInclusionList)
-		_ = json.Unmarshal([]byte(groupExcJSON), &f.GroupExclusionList)
-		if f.GroupInclusionList == nil {
-			f.GroupInclusionList = []string{}
-		}
-		if f.GroupExclusionList == nil {
-			f.GroupExclusionList = []string{}
+		f.ProcessDMs = processDMs == 1
+		f.DMContacts = dmContacts == 1
+		f.DMNonContacts = dmNonContacts == 1
+		f.DMBusinesses = dmBusinesses == 1
+		f.DMNonBusinesses = dmNonBusinesses == 1
+		f.ProcessGroups = processGroups == 1
+		_ = json.Unmarshal([]byte(groupListJSON), &f.GroupList)
+		if f.GroupList == nil {
+			f.GroupList = []string{}
 		}
 		out = append(out, f)
 	}
@@ -237,32 +267,45 @@ func (s *Store) SaveFilter(filterJson string) (string, error) {
 	}
 	f.UpdatedAt = now
 
-	// Ensure arrays are not nil
-	if f.GroupInclusionList == nil {
-		f.GroupInclusionList = []string{}
-	}
-	if f.GroupExclusionList == nil {
-		f.GroupExclusionList = []string{}
+	// Ensure array is not nil
+	if f.GroupList == nil {
+		f.GroupList = []string{}
 	}
 
-	groupIncJSON, _ := json.Marshal(f.GroupInclusionList)
-	groupExcJSON, _ := json.Marshal(f.GroupExclusionList)
-	processDM := 0
-	if f.ProcessDirectMessages {
-		processDM = 1
-	}
+	groupListJSON, _ := json.Marshal(f.GroupList)
+
+	// Convert bools to integers for SQLite
+	processDMs := boolToInt(f.ProcessDMs)
+	dmContacts := boolToInt(f.DMContacts)
+	dmNonContacts := boolToInt(f.DMNonContacts)
+	dmBusinesses := boolToInt(f.DMBusinesses)
+	dmNonBusinesses := boolToInt(f.DMNonBusinesses)
+	processGroups := boolToInt(f.ProcessGroups)
 
 	_, err := s.db.Exec(`
-INSERT INTO waci_filters (id, name, prompt, process_direct_messages, group_inclusion_list, group_exclusion_list, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO waci_filters (
+  id, name, prompt, 
+  process_dms, dm_contacts, dm_non_contacts, dm_businesses, dm_non_businesses,
+  process_groups, group_mode, group_list,
+  created_at, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-  name                    = excluded.name,
-  prompt                  = excluded.prompt,
-  process_direct_messages = excluded.process_direct_messages,
-  group_inclusion_list    = excluded.group_inclusion_list,
-  group_exclusion_list    = excluded.group_exclusion_list,
-  updated_at              = excluded.updated_at
-`, f.ID, f.Name, f.Prompt, processDM, string(groupIncJSON), string(groupExcJSON), f.CreatedAt, f.UpdatedAt)
+  name              = excluded.name,
+  prompt            = excluded.prompt,
+  process_dms       = excluded.process_dms,
+  dm_contacts       = excluded.dm_contacts,
+  dm_non_contacts   = excluded.dm_non_contacts,
+  dm_businesses     = excluded.dm_businesses,
+  dm_non_businesses = excluded.dm_non_businesses,
+  process_groups    = excluded.process_groups,
+  group_mode        = excluded.group_mode,
+  group_list        = excluded.group_list,
+  updated_at        = excluded.updated_at
+`, f.ID, f.Name, f.Prompt,
+		processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses,
+		processGroups, f.GroupMode, string(groupListJSON),
+		f.CreatedAt, f.UpdatedAt)
 	if err != nil {
 		return "", fmt.Errorf("failed to save filter: %w", err)
 	}
@@ -397,21 +440,33 @@ ORDER BY r.received_at DESC
 // getFilter returns a single filter by ID.
 func (s *Store) getFilter(id string) (Filter, error) {
 	var f Filter
-	var processDM int
-	var groupIncJSON, groupExcJSON string
-	err := s.db.QueryRow(`SELECT id, name, prompt, process_direct_messages, group_inclusion_list, group_exclusion_list, created_at, updated_at FROM waci_filters WHERE id = ?`, id).
-		Scan(&f.ID, &f.Name, &f.Prompt, &processDM, &groupIncJSON, &groupExcJSON, &f.CreatedAt, &f.UpdatedAt)
+	var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups int
+	var groupListJSON string
+	err := s.db.QueryRow(`
+		SELECT id, name, prompt,
+		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1),
+		       COALESCE(dm_businesses, 0), COALESCE(dm_non_businesses, 1),
+		       COALESCE(process_groups, 1), COALESCE(group_mode, ''), COALESCE(group_list, '[]'),
+		       created_at, updated_at
+		FROM waci_filters WHERE id = ?
+	`, id).Scan(
+		&f.ID, &f.Name, &f.Prompt,
+		&processDMs, &dmContacts, &dmNonContacts, &dmBusinesses, &dmNonBusinesses,
+		&processGroups, &f.GroupMode, &groupListJSON,
+		&f.CreatedAt, &f.UpdatedAt,
+	)
 	if err != nil {
 		return f, err
 	}
-	f.ProcessDirectMessages = processDM == 1
-	_ = json.Unmarshal([]byte(groupIncJSON), &f.GroupInclusionList)
-	_ = json.Unmarshal([]byte(groupExcJSON), &f.GroupExclusionList)
-	if f.GroupInclusionList == nil {
-		f.GroupInclusionList = []string{}
-	}
-	if f.GroupExclusionList == nil {
-		f.GroupExclusionList = []string{}
+	f.ProcessDMs = processDMs == 1
+	f.DMContacts = dmContacts == 1
+	f.DMNonContacts = dmNonContacts == 1
+	f.DMBusinesses = dmBusinesses == 1
+	f.DMNonBusinesses = dmNonBusinesses == 1
+	f.ProcessGroups = processGroups == 1
+	_ = json.Unmarshal([]byte(groupListJSON), &f.GroupList)
+	if f.GroupList == nil {
+		f.GroupList = []string{}
 	}
 	return f, nil
 }
@@ -421,4 +476,12 @@ func (s *Store) RawMessageCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM waci_raw_messages`).Scan(&count)
 	return count, err
+}
+
+// boolToInt converts a bool to int for SQLite storage (1 or 0).
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
