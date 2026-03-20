@@ -15,6 +15,9 @@ export interface Filter {
   id: string;
   name: string;
   prompt: string;
+  process_direct_messages: boolean;
+  group_inclusion_list: string[];
+  group_exclusion_list: string[];
   created_at: number;
   updated_at: number;
 }

@@ -4,6 +4,42 @@ import (
 	"strings"
 )
 
+// shouldProcessMessage checks if a message should be processed based on filter options.
+// Returns (shouldProcess bool, skipReason string).
+// This implements the same filtering logic as the core implementation.
+func shouldProcessMessage(filter Filter, chatJID string) (bool, string) {
+	isGroup := strings.HasSuffix(chatJID, "@g.us")
+
+	if isGroup {
+		// Group message
+		if len(filter.GroupInclusionList) > 0 {
+			// If inclusion list is set, only process groups in that list
+			for _, id := range filter.GroupInclusionList {
+				if id == chatJID {
+					return true, ""
+				}
+			}
+			return false, "group not in inclusion list"
+		} else if len(filter.GroupExclusionList) > 0 {
+			// If exclusion list is set, skip groups in that list
+			for _, id := range filter.GroupExclusionList {
+				if id == chatJID {
+					return false, "group in exclusion list"
+				}
+			}
+			return true, ""
+		}
+		// No inclusion/exclusion list: process all groups
+		return true, ""
+	} else {
+		// Direct message
+		if !filter.ProcessDirectMessages {
+			return false, "direct message processing disabled"
+		}
+		return true, ""
+	}
+}
+
 // matchesMetadataFilter checks if a message matches a special metadata-based filter.
 // Returns (matched bool, reason string, confidence float64, handled bool).
 // If handled=false, the caller should proceed with normal Claude triage.

@@ -320,6 +320,11 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 			continue
 		}
 		for _, msg := range msgs {
+			// Check if filter should process this message (DM/group options)
+			shouldProcess, _ := shouldProcessMessage(f, msg.ChatJID)
+			if !shouldProcess {
+				continue
+			}
 			// Check metadata-based filter first
 			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.ChatJID, msg.SenderJID)
 			var triageErr error
@@ -373,6 +378,11 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 	triage := NewTriageClient(claudeApiKey, "")
 	matched := 0
 	for _, msg := range msgs {
+		// Check if filter should process this message (DM/group options)
+		shouldProcess, _ := shouldProcessMessage(filter, msg.ChatJID)
+		if !shouldProcess {
+			continue
+		}
 		// Check metadata-based filter first
 		ok, reason, confidence, handled := matchesMetadataFilter(filter.Prompt, msg.ChatJID, msg.SenderJID)
 		var triageErr error
@@ -478,6 +488,11 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	triage := NewTriageClient(claudeApiKey, "")
 	for _, msg := range collected {
 		for _, f := range filters {
+			// Check if filter should process this message (DM/group options)
+			shouldProcess, _ := shouldProcessMessage(f, msg.chatJID)
+			if !shouldProcess {
+				continue
+			}
 			// Check metadata-based filter first
 			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.chatJID, msg.senderJID)
 			var err error
