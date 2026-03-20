@@ -51,10 +51,10 @@ export default function InboxScreen() {
   };
 
   const handleOpenMessage = (item: FilterMatch) => {
-    const jid = item.chat_jid;
-    if (!jid) return;
+    const chatJID = item.chat_jid;
+    if (!chatJID) return;
 
-    if (jid.endsWith('@g.us')) {
+    if (chatJID.endsWith('@g.us')) {
       // Groups: no reliable public deep link — inform the user.
       Alert.alert(
         'Group message',
@@ -64,8 +64,10 @@ export default function InboxScreen() {
       return;
     }
 
-    // Individual chat: strip @s.whatsapp.net to get the phone number.
-    const phone = jid.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+    // Individual chat (DM): use sender_jid to get the contact's phone number.
+    // For DMs, sender_jid is the person you're chatting with.
+    const senderJID = item.sender_jid;
+    const phone = senderJID.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
     if (!phone) return;
 
     // wa.me opens the conversation in WhatsApp (works on Android + iOS).
