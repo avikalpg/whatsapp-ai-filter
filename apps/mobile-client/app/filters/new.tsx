@@ -16,8 +16,8 @@ import {
   Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useAppStore } from '../../../src/stores/appStore';
-import type { Filter } from '../../../src/native/wabridge';
+import { useAppStore } from '../../src/stores/appStore';
+import type { Filter } from '../../src/native/wabridge';
 
 export default function FilterEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
