@@ -147,16 +147,19 @@ CREATE TABLE IF NOT EXISTS waci_raw_messages (
 		return err
 	}
 
-	// Seed the built-in "All Messages" filter exactly once.
-	// Tracked via sync_state so a user who deletes it doesn't see it reappear.
+	// Seed the built-in default filters exactly once.
+	// Tracked via sync_state so a user who deletes them doesn't see them reappear.
 	var seeded int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filter_seeded'`).Scan(&seeded)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filters_seeded_v2'`).Scan(&seeded)
 	if seeded == 0 {
 		_, _ = s.db.Exec(`
 INSERT INTO waci_filters (id, name, prompt, created_at, updated_at)
-VALUES ('flt_default_all', 'All Messages', '*', strftime('%s','now'), strftime('%s','now'))
+VALUES 
+  ('flt_default_all', 'All Messages', '*', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms', 'All DMs', '*:dm', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', strftime('%s','now'), strftime('%s','now'))
 `)
-		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filter_seeded', '1')`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v2', '1')`)
 	}
 	return nil
 }

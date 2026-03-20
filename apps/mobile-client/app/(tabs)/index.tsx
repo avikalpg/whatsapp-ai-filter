@@ -1,6 +1,6 @@
 /**
- * Inbox screen — shows all filter matches across all filters.
- * Pulls from every filter's matches and merges them sorted by received_at desc.
+ * Inbox screen — shows all filters with their match counts.
+ * User taps a filter to see its matched messages.
  */
 import React, { useEffect, useCallback } from 'react';
 import {
@@ -11,13 +11,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Linking,
-  Alert,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAppStore } from '../../src/stores/appStore';
-import type { FilterMatch } from '../../src/native/wabridge';
+import type { Filter } from '../../src/native/wabridge';
 
 export default function InboxScreen() {
+  const router = useRouter();
   const {
     filters,
     matches,
@@ -41,15 +41,12 @@ export default function InboxScreen() {
     loadAll();
   }, [loadAll]);
 
-  const allMatches: FilterMatch[] = Object.values(matches)
-    .flat()
-    .sort((a, b) => b.received_at - a.received_at);
-
   const handleSync = async () => {
     await syncAndTriage();
     await loadAll();
   };
 
+<<<<<<< HEAD
   const handleOpenMessage = (item: FilterMatch) => {
     const chatJID = item.chat_jid;
     if (!chatJID) return;
@@ -74,33 +71,39 @@ export default function InboxScreen() {
     Linking.openURL(`https://wa.me/${phone}`).catch(() => {
       Alert.alert('Error', 'Could not open WhatsApp. Make sure it is installed.');
     });
+=======
+  const handleFilterPress = (filter: Filter) => {
+    router.push(`/filters/${filter.id}`);
+>>>>>>> 88be7e7 (feat(inbox): show filters instead of messages; add All DMs and DMs from Contacts default filters)
   };
 
-  const renderItem = ({ item }: { item: FilterMatch }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => handleOpenMessage(item)}
-      activeOpacity={0.75}
-    >
-      <View style={styles.cardHeader}>
-        <Text style={styles.chatName} numberOfLines={1}>
-          {displayName(item.chat_name, item.chat_jid)}
+  const getMatchCount = (filterId: string): number => {
+    return matches[filterId]?.length ?? 0;
+  };
+
+  const renderItem = ({ item }: { item: Filter }) => {
+    const count = getMatchCount(item.id);
+    return (
+      <TouchableOpacity
+        style={styles.filterCard}
+        onPress={() => handleFilterPress(item)}
+        activeOpacity={0.75}
+      >
+        <View style={styles.filterHeader}>
+          <Text style={styles.filterName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{count}</Text>
+          </View>
+        </View>
+        <Text style={styles.filterPrompt} numberOfLines={2}>
+          {item.prompt}
         </Text>
-        <Text style={styles.time}>{formatTime(item.received_at)}</Text>
-      </View>
-      {/* Only show sender line when it differs from the chat (i.e. a group message) */}
-      {item.chat_jid.endsWith('@g.us') ? (
-        <Text style={styles.sender} numberOfLines={1}>
-          {displayName(item.sender_name, item.sender_jid)}
-        </Text>
-      ) : null}
-      <Text style={styles.body} numberOfLines={3}>{item.body}</Text>
-      {item.relevance_reason ? (
-        <Text style={styles.reason}>🤖 {item.relevance_reason}</Text>
-      ) : null}
-      <Text style={styles.tapHint}>Tap to open in WhatsApp →</Text>
-    </TouchableOpacity>
-  );
+        <Text style={styles.tapHint}>Tap to view messages →</Text>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -125,14 +128,14 @@ export default function InboxScreen() {
         </TouchableOpacity>
       </View>
 
-      {allMatches.length === 0 && !syncing ? (
+      {filters.length === 0 && !syncing ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>No matched messages yet.</Text>
-          <Text style={styles.emptyHint}>Add filters and tap Sync to get started.</Text>
+          <Text style={styles.emptyText}>No filters yet.</Text>
+          <Text style={styles.emptyHint}>Create a filter to get started.</Text>
         </View>
       ) : (
         <FlatList
-          data={allMatches}
+          data={filters}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           refreshControl={<RefreshControl refreshing={syncing} onRefresh={handleSync} />}
@@ -141,35 +144,6 @@ export default function InboxScreen() {
       )}
     </View>
   );
-}
-
-/**
- * Returns a human-readable display name for a chat or sender.
- * Priority: stored name → formatted phone number → cleaned JID.
- */
-function displayName(name: string | null | undefined, jid: string): string {
-  if (name && name.trim() && name !== jid) return name.trim();
-
-  if (!jid) return 'Unknown';
-
-  // Group JID: "120363XXXXXX@g.us"
-  if (jid.endsWith('@g.us')) {
-    return `Group (${jid.replace('@g.us', '')})`;
-  }
-
-  // Individual JID: "441234567890@s.whatsapp.net"
-  const phone = jid.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
-  return phone ? `+${phone}` : jid;
-}
-
-function formatTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) {
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  }
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 const styles = StyleSheet.create({
@@ -188,7 +162,7 @@ const styles = StyleSheet.create({
   syncButton: { paddingHorizontal: 12, paddingVertical: 6 },
   syncButtonText: { color: '#007AFF', fontWeight: '600' },
   list: { padding: 12 },
-  card: {
+  filterCard: {
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 14,
@@ -198,13 +172,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 },
-  chatName: { fontWeight: '600', fontSize: 15, flex: 1 },
-  time: { fontSize: 12, color: '#999', marginLeft: 8 },
-  sender: { fontSize: 13, color: '#555', marginBottom: 4 },
-  body: { fontSize: 14, color: '#333', lineHeight: 20 },
-  reason: { fontSize: 12, color: '#888', marginTop: 6, fontStyle: 'italic' },
-  tapHint: { fontSize: 11, color: '#25D366', marginTop: 8, textAlign: 'right' },
+  filterHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center',
+    marginBottom: 6 
+  },
+  filterName: { fontWeight: '600', fontSize: 16, flex: 1 },
+  badge: {
+    backgroundColor: '#25D366',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginLeft: 8,
+  },
+  badgeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  filterPrompt: { fontSize: 13, color: '#666', lineHeight: 18, marginBottom: 8 },
+  tapHint: { fontSize: 11, color: '#25D366', textAlign: 'right' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyText: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
   emptyHint: { fontSize: 14, color: '#888', textAlign: 'center' },

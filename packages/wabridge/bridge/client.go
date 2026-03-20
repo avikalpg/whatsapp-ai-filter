@@ -320,7 +320,12 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 			continue
 		}
 		for _, msg := range msgs {
-			matched, reason, confidence, triageErr := triage.TriageMessage(msg.Body, f.Prompt)
+			// Check metadata-based filter first
+			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.ChatJID, msg.SenderJID)
+			var triageErr error
+			if !handled {
+				matched, reason, confidence, triageErr = triage.TriageMessage(msg.Body, f.Prompt)
+			}
 			if triageErr != nil {
 				continue
 			}
@@ -368,7 +373,12 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 	triage := NewTriageClient(claudeApiKey, "")
 	matched := 0
 	for _, msg := range msgs {
-		ok, reason, confidence, triageErr := triage.TriageMessage(msg.Body, filter.Prompt)
+		// Check metadata-based filter first
+		ok, reason, confidence, handled := matchesMetadataFilter(filter.Prompt, msg.ChatJID, msg.SenderJID)
+		var triageErr error
+		if !handled {
+			ok, reason, confidence, triageErr = triage.TriageMessage(msg.Body, filter.Prompt)
+		}
 		if triageErr != nil {
 			continue
 		}
@@ -468,7 +478,12 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	triage := NewTriageClient(claudeApiKey, "")
 	for _, msg := range collected {
 		for _, f := range filters {
-			matched, reason, confidence, err := triage.TriageMessage(msg.body, f.Prompt)
+			// Check metadata-based filter first
+			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.chatJID, msg.senderJID)
+			var err error
+			if !handled {
+				matched, reason, confidence, err = triage.TriageMessage(msg.body, f.Prompt)
+			}
 			if err != nil {
 				continue
 			}
