@@ -73,15 +73,40 @@ export default function FilterMessagesScreen() {
 
   const renderItem = ({ item }: { item: FilterMatch }) => {
     const time = new Date(item.received_at * 1000).toLocaleString();
+    const isGroup = item.chat_jid.endsWith('@g.us');
+    
+    // For DMs, prefer sender_name. For groups, use chat_name.
+    let displayName = isGroup ? item.chat_name : item.sender_name;
+    
+    // Check if the name is likely from a saved contact vs WhatsApp profile
+    // If sender_name looks like a JID or equals the JID, it's not a real name
+    const isProfileName = !isGroup && (
+      item.sender_name === item.sender_jid ||
+      item.sender_name.includes('@') ||
+      /^\+?\d+$/.test(item.sender_name) // Just a phone number
+    );
+    
+    // Fallback: if no good name, format the JID as a phone number
+    if (!displayName || displayName === item.chat_jid || displayName === item.sender_jid) {
+      const phone = (isGroup ? item.chat_jid : item.sender_jid)
+        .replace('@s.whatsapp.net', '')
+        .replace('@g.us', '')
+        .replace(/[^0-9]/g, '');
+      displayName = phone ? `+${phone}` : 'Unknown';
+    }
+    
     return (
       <TouchableOpacity style={styles.card} onPress={() => handleOpenMessage(item)}>
         <View style={styles.cardHeader}>
-          <Text style={styles.chatName} numberOfLines={1}>
-            {item.chat_name}
+          <Text 
+            style={[styles.chatName, isProfileName && styles.profileName]} 
+            numberOfLines={1}
+          >
+            {displayName}
           </Text>
           <Text style={styles.time}>{time}</Text>
         </View>
-        {item.sender_name !== item.chat_name && (
+        {isGroup && item.sender_name && (
           <Text style={styles.sender}>{item.sender_name}</Text>
         )}
         <Text style={styles.body} numberOfLines={4}>
@@ -156,6 +181,7 @@ const styles = StyleSheet.create({
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 },
   chatName: { fontWeight: '600', fontSize: 15, flex: 1 },
+  profileName: { fontStyle: 'italic', fontWeight: '500' }, // WhatsApp profile name (not saved contact)
   time: { fontSize: 12, color: '#999', marginLeft: 8 },
   sender: { fontSize: 13, color: '#555', marginBottom: 4 },
   body: { fontSize: 14, color: '#333', lineHeight: 20 },
