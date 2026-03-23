@@ -87,7 +87,12 @@ func NewClient(dbPath string, store *Store) (*Client, error) {
 // Call IsLinked() to poll for pairing completion.
 // Call SyncHistory() to wait for HistorySync to finish and run filter triage.
 func (c *Client) StartPairing(phoneNumber string) (string, error) {
+	// Strip all non-digit characters from phone number (WhatsApp expects digits only)
 	phone := strings.TrimPrefix(phoneNumber, "+")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, " ", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
 
 	ctx := context.Background()
 	deviceStore, err := c.waStore.GetFirstDevice(ctx)
