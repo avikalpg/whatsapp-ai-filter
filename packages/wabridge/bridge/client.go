@@ -4,6 +4,7 @@ package bridge
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -581,7 +582,6 @@ func (c *Client) GetGroups() (string, error) {
 
 	logger := waLog.Stdout("wabridge-groups", "WARN", true)
 	client := whatsmeow.NewClient(deviceStore, logger)
-	deviceStore.Contacts = c.store
 
 	if err := client.Connect(); err != nil {
 		return "", fmt.Errorf("failed to connect: %w", err)
@@ -589,7 +589,7 @@ func (c *Client) GetGroups() (string, error) {
 	defer client.Disconnect()
 
 	// GetJoinedGroups returns all groups we're currently a member of
-	groups, err := client.GetJoinedGroups()
+	groups, err := client.GetJoinedGroups(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get groups: %w", err)
 	}
