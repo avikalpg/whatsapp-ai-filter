@@ -153,3 +153,16 @@ export async function startHistorySync(): Promise<SyncResult> {
 export async function unlink(): Promise<void> {
   return NativeWabridge.unlink();
 }
+
+/** Group info returned by getGroups */
+export interface GroupInfo {
+  jid: string;
+  name: string;
+  participant_count: number;
+}
+
+/** Get all WhatsApp groups this account is a member of */
+export async function getGroups(): Promise<GroupInfo[]> {
+  const json = await NativeWabridge.getGroups();
+  return JSON.parse(json);
+}

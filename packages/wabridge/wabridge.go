@@ -151,3 +151,9 @@ type messageCallbackAdapter struct {
 func (a *messageCallbackAdapter) OnMessage(jsonPayload string) {
 	a.outer.OnMessage(jsonPayload)
 }
+
+// GetGroups returns a JSON array of all WhatsApp groups this account is a member of.
+// Each entry: {"jid": "...", "name": "...", "participant_count": N}
+func (b *Bridge) GetGroups() (string, error) {
+	return b.internal.GetGroups()
+}

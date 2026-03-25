@@ -569,3 +569,46 @@ func extractBodyFromMsg(msg *waE2E.Message) string {
 func extractBody(evt *events.Message) string {
 	return extractBodyFromMsg(evt.Message)
 }
+
+// GetGroups returns a JSON array of all groups (group chats) this WhatsApp account is a member of.
+// Each entry contains: {"jid": "...", "name": "...", "participant_count": N}
+func (c *Client) GetGroups() (string, error) {
+	ctx := context.Background()
+	deviceStore, err := c.waStore.GetFirstDevice(ctx)
+	if err != nil || deviceStore == nil {
+		return "", fmt.Errorf("not linked to WhatsApp")
+	}
+
+	logger := waLog.Stdout("wabridge-groups", "WARN", true)
+	client := whatsmeow.NewClient(deviceStore, logger)
+	deviceStore.Contacts = c.store
+
+	if err := client.Connect(); err != nil {
+		return "", fmt.Errorf("failed to connect: %w", err)
+	}
+	defer client.Disconnect()
+
+	// GetJoinedGroups returns all groups we're currently a member of
+	groups, err := client.GetJoinedGroups()
+	if err != nil {
+		return "", fmt.Errorf("failed to get groups: %w", err)
+	}
+
+	type GroupInfo struct {
+		JID              string `json:"jid"`
+		Name             string `json:"name"`
+		ParticipantCount int    `json:"participant_count"`
+	}
+
+	var result []GroupInfo
+	for _, group := range groups {
+		result = append(result, GroupInfo{
+			JID:              group.JID.String(),
+			Name:             group.Name,
+			ParticipantCount: len(group.Participants),
+		})
+	}
+
+	b, err := json.Marshal(result)
+	return string(b), err
+}

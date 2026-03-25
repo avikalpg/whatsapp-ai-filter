@@ -18,6 +18,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAppStore } from '../../../src/stores/appStore';
 import type { Filter } from '../../../src/native/wabridge';
+import GroupPicker from '../../../src/components/GroupPicker';
 
 export default function FilterEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -41,9 +42,7 @@ export default function FilterEditScreen() {
   const [groupMode, setGroupMode] = useState<'inclusion' | 'exclusion'>(
     existingFilter?.group_mode ?? 'exclusion'
   );
-  const [groupListText, setGroupListText] = useState(
-    existingFilter?.group_list?.join(', ') ?? ''
-  );
+  const [groupList, setGroupList] = useState<string[]>(existingFilter?.group_list ?? []);
   
   const [saving, setSaving] = useState(false);
 
@@ -56,11 +55,6 @@ export default function FilterEditScreen() {
       Alert.alert('Error', 'Please enter a filter description.');
       return;
     }
-
-    const groupList = groupListText
-      .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
 
     if (processGroups && groupMode === 'inclusion' && groupList.length === 0) {
       Alert.alert('Error', 'Inclusion mode requires at least one group.');
@@ -220,19 +214,14 @@ export default function FilterEditScreen() {
               {groupMode === 'exclusion' ? 'Excluded Groups' : 'Included Groups'}
               {groupMode === 'inclusion' && <Text style={styles.required}> *</Text>}
             </Text>
-            <Text style={styles.hint}>
-              Enter group JIDs separated by commas (e.g., 120363XXXXX@g.us, 120363YYYYY@g.us)
-            </Text>
-            <TextInput
-              style={[styles.input, styles.multiline]}
-              placeholder={groupMode === 'exclusion' ? 'Leave empty to include all groups' : 'Required: at least one group'}
-              value={groupListText}
-              onChangeText={setGroupListText}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-              autoCapitalize="none"
-            />
+            
+            <View style={{ height: 300 }}>
+              <GroupPicker
+                selectedJIDs={groupList}
+                onSelectionChange={setGroupList}
+                mode={groupMode}
+              />
+            </View>
           </View>
         )}
 
