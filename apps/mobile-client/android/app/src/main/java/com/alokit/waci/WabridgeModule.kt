@@ -141,6 +141,15 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // ── getGroups ────────────────────────────────────────────────────────────
+
+    @ReactMethod
+    fun getGroups(promise: Promise) {
+        runOnBackground(promise) {
+            requireBridge().getGroups()
+        }
+    }
+
     // ── unlink ───────────────────────────────────────────────────────────────
 
     @ReactMethod
