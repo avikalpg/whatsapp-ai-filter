@@ -383,6 +383,14 @@ func (s *Store) GetMatches(filterId string, limit int) (string, error) {
 			return "", err
 		}
 		m.IsRead = isRead == 1
+		
+		// Enrich sender name with contact name if available
+		if jid, err := types.ParseJID(m.SenderJID); err == nil {
+			if contactName, _ := s.GetContactName(jid); contactName != "" {
+				m.SenderName = contactName
+			}
+		}
+		
 		out = append(out, m)
 	}
 	if out == nil {

@@ -180,9 +180,6 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 		return "", fmt.Errorf("failed to connect for pairing: %w", err)
 	}
 
-	// Fetch app state (contacts) after connecting
-	_ = client.FetchAppState(ctx, appstate.WAPatchRegularHigh, false, false)
-
 	code, err := client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
 	if err != nil {
 		client.Disconnect()
@@ -233,6 +230,14 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 	c.pairingMu.Lock()
 	pc := c.pairingClient
 	c.pairingMu.Unlock()
+
+	// Fetch contacts from app state before processing history
+	if pc != nil {
+		ctx := context.Background()
+		_ = pc.FetchAppState(ctx, appstate.WAPatchRegularHigh, false, false)
+		// Give contacts a moment to sync
+		time.Sleep(2 * time.Second)
+	}
 
 	if pc != nil {
 		// pairingClient is alive and has the HistorySync handler registered.
