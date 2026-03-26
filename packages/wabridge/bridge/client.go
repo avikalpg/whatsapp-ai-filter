@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -103,6 +104,21 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 
 	logger := waLog.Stdout("wabridge-client", "WARN", true)
 	client := whatsmeow.NewClient(deviceStore, logger)
+	deviceStore.Contacts = c.store
+
+	// Register Contact handler for app state sync
+	client.AddEventHandler(func(evt interface{}) {
+		contactEvt, ok := evt.(*events.Contact)
+		if !ok || contactEvt.Action == nil {
+			return
+		}
+		firstName := contactEvt.Action.GetFirstName()
+		fullName := contactEvt.Action.GetFullName()
+		if fullName == "" {
+			fullName = firstName
+		}
+		_ = c.store.PutContactName(context.Background(), contactEvt.JID, fullName, firstName)
+	})
 
 	// Register HistorySync handler BEFORE connecting so no events are missed.
 	// Messages are saved directly to waci_raw_messages as they arrive.
@@ -163,6 +179,9 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 	if err := client.Connect(); err != nil {
 		return "", fmt.Errorf("failed to connect for pairing: %w", err)
 	}
+
+	// Fetch app state (contacts) after connecting
+	_ = client.FetchAppState(ctx, appstate.WAPatchRegularHigh, false, false)
 
 	code, err := client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
 	if err != nil {

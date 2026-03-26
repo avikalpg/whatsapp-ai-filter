@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -153,6 +154,13 @@ CREATE TABLE IF NOT EXISTS waci_raw_messages (
   body        TEXT    NOT NULL,
   received_at INTEGER NOT NULL,
   created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS waci_contacts (
+  jid        TEXT    PRIMARY KEY,
+  first_name TEXT,
+  full_name  TEXT,
+  updated_at INTEGER NOT NULL
 );
 `)
 	if err != nil {
@@ -488,10 +496,130 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// GetContact returns contact information for a JID.
-// Returns ContactInfo with Found=false if not in the contact list.
+// ── Contact Store Methods ───────────────────────────────────────────────────
+// These methods implement whatsmeow's ContactStore interface for app state sync
+
+// PutContactName signature matches whatsmeow ContactStore: (ctx, user, fullName, firstName)
+func (s *Store) PutContactName(ctx context.Context, jid types.JID, fullName, firstName string) error {
+	_, err := s.db.Exec(`
+INSERT INTO waci_contacts (jid, first_name, full_name, updated_at)
+VALUES (?, ?, ?, strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  first_name = excluded.first_name,
+  full_name = excluded.full_name,
+  updated_at = excluded.updated_at
+`, jid.String(), firstName, fullName)
+	return err
+}
+
+func (s *Store) PutAllContactNames(ctx context.Context, contacts []store.ContactEntry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+INSERT INTO waci_contacts (jid, first_name, full_name, updated_at)
+VALUES (?, ?, ?, strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  first_name = excluded.first_name,
+  full_name = excluded.full_name,
+  updated_at = excluded.updated_at
+`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, contact := range contacts {
+		_, err = stmt.Exec(contact.JID.String(), contact.FirstName, contact.FullName)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) GetContactName(jid types.JID) (string, error) {
+	var fullName string
+	err := s.db.QueryRow(`SELECT full_name FROM waci_contacts WHERE jid = ?`, jid.String()).Scan(&fullName)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return fullName, err
+}
+
+func (s *Store) GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error) {
+	rows, err := s.db.Query(`SELECT jid, first_name, full_name FROM waci_contacts`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	contacts := make(map[types.JID]types.ContactInfo)
+	for rows.Next() {
+		var jidStr, firstName, fullName string
+		if err := rows.Scan(&jidStr, &firstName, &fullName); err != nil {
+			continue
+		}
+		jid, err := types.ParseJID(jidStr)
+		if err != nil {
+			continue
+		}
+		contacts[jid] = types.ContactInfo{
+			Found:     true,
+			FirstName: firstName,
+			FullName:  fullName,
+		}
+	}
+	return contacts, rows.Err()
+}
+
 func (s *Store) GetContact(ctx context.Context, user types.JID) (types.ContactInfo, error) {
-	// TODO: Implement contact sync via app state
-	// For now, return not found (will treat all DMs as non-contacts)
-	return types.ContactInfo{Found: false}, nil
+	var firstName, fullName string
+	err := s.db.QueryRow(`SELECT first_name, full_name FROM waci_contacts WHERE jid = ?`, user.String()).Scan(&firstName, &fullName)
+	if err == sql.ErrNoRows {
+		return types.ContactInfo{Found: false}, nil
+	}
+	if err != nil {
+		return types.ContactInfo{}, err
+	}
+	return types.ContactInfo{
+		Found:     true,
+		FirstName: firstName,
+		FullName:  fullName,
+	}, nil
+}
+
+func (s *Store) PutPushName(ctx context.Context, user types.JID, pushName string) (bool, string, error) {
+	var old string
+	_ = s.db.QueryRow(`SELECT full_name FROM waci_contacts WHERE jid = ?`, user.String()).Scan(&old)
+	_, err := s.db.Exec(`
+INSERT INTO waci_contacts (jid, full_name, first_name, updated_at)
+VALUES (?, ?, '', strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  full_name = CASE WHEN full_name = '' OR full_name IS NULL THEN excluded.full_name ELSE full_name END,
+  updated_at = excluded.updated_at
+`, user.String(), pushName)
+	return old != pushName, old, err
+}
+
+func (s *Store) PutBusinessName(ctx context.Context, user types.JID, businessName string) (bool, string, error) {
+	var old string
+	_ = s.db.QueryRow(`SELECT full_name FROM waci_contacts WHERE jid = ?`, user.String()).Scan(&old)
+	_, err := s.db.Exec(`
+INSERT INTO waci_contacts (jid, full_name, first_name, updated_at)
+VALUES (?, ?, '', strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  full_name = CASE WHEN full_name = '' OR full_name IS NULL THEN excluded.full_name ELSE full_name END,
+  updated_at = excluded.updated_at
+`, user.String(), businessName)
+	return old != businessName, old, err
+}
+
+func (s *Store) PutManyRedactedPhones(ctx context.Context, entries []store.RedactedPhoneEntry) error {
+	// We don't need to store redacted phones for our use case
+	return nil
 }
