@@ -56,25 +56,24 @@ func (s *Store) shouldProcessMessage(filter Filter, chatJID string, senderJID st
 		isBusiness := err == nil && contactInfo.Found && contactInfo.BusinessName != ""
 
 		// Apply DM subcategory filters
-		if isContact {
-			if !filter.DMContacts {
-				return false, "contacts disabled for this filter"
-			}
-		} else {
-			if !filter.DMNonContacts {
-				return false, "non-contacts disabled for this filter"
-			}
+		// Contact filter
+		if isContact && !filter.DMContacts {
+			return false, "contacts disabled for this filter"
+		}
+		if !isContact && !filter.DMNonContacts {
+			return false, "non-contacts disabled for this filter"
 		}
 
-		if isBusiness {
-			if !filter.DMBusinesses {
+		// Business filter (only apply if contact info is available)
+		if contactInfo.Found {
+			if isBusiness && !filter.DMBusinesses {
 				return false, "businesses disabled for this filter"
 			}
-		} else {
-			if !filter.DMNonBusinesses {
+			if !isBusiness && !filter.DMNonBusinesses {
 				return false, "non-businesses disabled for this filter"
 			}
 		}
+		// If contact info not found, skip business filtering to avoid false negatives
 
 		return true, ""
 	}

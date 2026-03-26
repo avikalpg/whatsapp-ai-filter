@@ -197,8 +197,8 @@ INSERT INTO waci_filters (
   created_at, updated_at
 )
 VALUES 
-  ('flt_default_all', 'All Messages', '*', 1, 1, 1, 0, 1, 1, '', '[]', strftime('%s','now'), strftime('%s','now')),
-  ('flt_default_dms', 'All DMs', '*:dm', 1, 1, 1, 0, 1, 0, '', '[]', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_all', 'All Messages', '*', 1, 1, 1, 1, 1, 1, '', '[]', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms', 'All DMs', '*:dm', 1, 1, 1, 1, 1, 0, '', '[]', strftime('%s','now'), strftime('%s','now')),
   ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', 1, 1, 0, 0, 0, 0, '', '[]', strftime('%s','now'), strftime('%s','now'))
 `)
 		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v2', '1')`)
