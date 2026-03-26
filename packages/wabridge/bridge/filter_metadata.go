@@ -1,13 +1,16 @@
 package bridge
 
 import (
+	"context"
 	"strings"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 // shouldProcessMessage checks if a message should be processed based on filter options.
 // Returns (shouldProcess bool, skipReason string).
 // This implements granular DM/group filtering logic.
-func shouldProcessMessage(filter Filter, chatJID string, senderJID string) (bool, string) {
+func (s *Store) shouldProcessMessage(filter Filter, chatJID string, senderJID string) (bool, string) {
 	isGroup := strings.HasSuffix(chatJID, "@g.us")
 
 	if isGroup {
@@ -39,9 +42,40 @@ func shouldProcessMessage(filter Filter, chatJID string, senderJID string) (bool
 		if !filter.ProcessDMs {
 			return false, "DM processing disabled"
 		}
-		// TODO: Check DM subcategories (contacts, businesses, etc.)
-		// For now, we process all DMs if ProcessDMs is true
-		// Future: check against WhatsApp contact list and business status
+
+		// Check DM subcategories
+		jid, err := types.ParseJID(senderJID)
+		if err != nil {
+			// Invalid JID, process anyway to avoid silently dropping messages
+			return true, ""
+		}
+
+		// Get contact info to check if sender is a contact and/or business
+		contactInfo, err := s.GetContact(context.Background(), jid)
+		isContact := err == nil && contactInfo.Found
+		isBusiness := err == nil && contactInfo.Found && contactInfo.BusinessName != ""
+
+		// Apply DM subcategory filters
+		if isContact {
+			if !filter.DMContacts {
+				return false, "contacts disabled for this filter"
+			}
+		} else {
+			if !filter.DMNonContacts {
+				return false, "non-contacts disabled for this filter"
+			}
+		}
+
+		if isBusiness {
+			if !filter.DMBusinesses {
+				return false, "businesses disabled for this filter"
+			}
+		} else {
+			if !filter.DMNonBusinesses {
+				return false, "non-businesses disabled for this filter"
+			}
+		}
+
 		return true, ""
 	}
 }

@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Store manages WACI application data in SQLite.
@@ -484,4 +486,12 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// GetContact returns contact information for a JID.
+// Returns ContactInfo with Found=false if not in the contact list.
+func (s *Store) GetContact(ctx context.Context, user types.JID) (types.ContactInfo, error) {
+	// TODO: Implement contact sync via app state
+	// For now, return not found (will treat all DMs as non-contacts)
+	return types.ContactInfo{Found: false}, nil
 }
