@@ -2,7 +2,7 @@
  * Inbox screen — shows all filters with their match counts.
  * User taps a filter to see its matched messages.
  */
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../src/stores/appStore';
@@ -29,6 +30,9 @@ export default function InboxScreen() {
     loadMatches,
   } = useAppStore();
 
+  const appState = useRef(AppState.currentState);
+  const hasAutoSyncedRef = useRef(false);
+
   const loadAll = useCallback(async () => {
     await loadFilters();
     const freshFilters = useAppStore.getState().filters;
@@ -37,16 +41,35 @@ export default function InboxScreen() {
     }
   }, [loadFilters, loadMatches]);
 
-  useEffect(() => {
-    loadAll();
-  }, [loadAll]);
-
-  const handleSync = async () => {
+  const handleSync = useCallback(async () => {
     await syncAndTriage();
     await loadAll();
-  };
+  }, [syncAndTriage, loadAll]);
 
-const handleFilterPress = (filter: Filter) => {
+  // Auto-sync on mount (first open)
+  useEffect(() => {
+    if (!hasAutoSyncedRef.current) {
+      hasAutoSyncedRef.current = true;
+      handleSync();
+    }
+  }, [handleSync]);
+
+  // Auto-sync when app comes to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        // App has come to the foreground
+        handleSync();
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleSync]);
+
+  const handleFilterPress = (filter: Filter) => {
     router.push(`/filters/${filter.id}/messages`);  };
 
   const getMatchCount = (filterId: string): number => {
