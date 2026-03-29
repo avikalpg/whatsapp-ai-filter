@@ -217,7 +217,7 @@ export default function FilterEditScreen() {
               {groupMode === 'inclusion' && <Text style={styles.required}> *</Text>}
             </Text>
             
-            <View style={{ height: 300 }}>
+            <View style={{ height: 400, marginBottom: 20 }}>
               <GroupPicker
                 selectedJIDs={groupList}
                 onSelectionChange={setGroupList}

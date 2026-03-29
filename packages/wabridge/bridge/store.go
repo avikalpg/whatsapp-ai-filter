@@ -203,6 +203,21 @@ VALUES
 `)
 		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v2', '1')`)
 	}
+
+	// Migrate to schema v4: fix business filter defaults
+	// Update existing filters that have dm_businesses=0 to dm_businesses=1
+	var schemaV4 int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v4'`).Scan(&schemaV4)
+	if schemaV4 == 0 {
+		_, _ = s.db.Exec(`
+UPDATE waci_filters 
+SET dm_businesses = 1 
+WHERE dm_businesses = 0 
+  AND id IN ('flt_default_all', 'flt_default_dms')
+`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v4', '1')`)
+	}
+
 	return nil
 }
 
