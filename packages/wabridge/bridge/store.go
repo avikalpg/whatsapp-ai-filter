@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS waci_contacts (
 ALTER TABLE waci_filters ADD COLUMN process_dms INTEGER DEFAULT 1;
 ALTER TABLE waci_filters ADD COLUMN dm_contacts INTEGER DEFAULT 1;
 ALTER TABLE waci_filters ADD COLUMN dm_non_contacts INTEGER DEFAULT 1;
-ALTER TABLE waci_filters ADD COLUMN dm_businesses INTEGER DEFAULT 0;
+ALTER TABLE waci_filters ADD COLUMN dm_businesses INTEGER DEFAULT 1;
 ALTER TABLE waci_filters ADD COLUMN dm_non_businesses INTEGER DEFAULT 1;
 ALTER TABLE waci_filters ADD COLUMN process_groups INTEGER DEFAULT 1;
 ALTER TABLE waci_filters ADD COLUMN group_mode TEXT DEFAULT '';
@@ -187,10 +187,10 @@ ALTER TABLE waci_filters ADD COLUMN group_list TEXT DEFAULT '[]';
 	// Seed the built-in default filters exactly once.
 	// Tracked via sync_state so a user who deletes them doesn't see them reappear.
 	var seeded int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filters_seeded_v2'`).Scan(&seeded)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filters_seeded_v3'`).Scan(&seeded)
 	if seeded == 0 {
 		_, _ = s.db.Exec(`
-INSERT INTO waci_filters (
+INSERT OR REPLACE INTO waci_filters (
   id, name, prompt, 
   process_dms, dm_contacts, dm_non_contacts, dm_businesses, dm_non_businesses,
   process_groups, group_mode, group_list,
@@ -201,21 +201,7 @@ VALUES
   ('flt_default_dms', 'All DMs', '*:dm', 1, 1, 1, 1, 1, 0, '', '[]', strftime('%s','now'), strftime('%s','now')),
   ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', 1, 1, 0, 0, 0, 0, '', '[]', strftime('%s','now'), strftime('%s','now'))
 `)
-		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v2', '1')`)
-	}
-
-	// Migrate to schema v4: fix business filter defaults
-	// Update existing filters that have dm_businesses=0 to dm_businesses=1
-	var schemaV4 int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v4'`).Scan(&schemaV4)
-	if schemaV4 == 0 {
-		_, _ = s.db.Exec(`
-UPDATE waci_filters 
-SET dm_businesses = 1 
-WHERE dm_businesses = 0 
-  AND id IN ('flt_default_all', 'flt_default_dms')
-`)
-		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v4', '1')`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v3', '1')`)
 	}
 
 	return nil
