@@ -59,9 +59,9 @@ if ! command -v gomobile &>/dev/null; then
   gomobile init
 fi
 
-echo "Running gomobile bind (arm64 + arm)..."
+echo "Running gomobile bind (arm64 + arm + x86_64 for emulator)..."
 gomobile bind \
-  -target=android/arm64,android/arm \
+  -target=android/arm64,android/arm,android/amd64 \
   -androidapi=21 \
   -o "$OUTPUT_DIR/wabridge.aar" \
   -v \

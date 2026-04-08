@@ -15,6 +15,16 @@ export interface Filter {
   id: string;
   name: string;
   prompt: string;
+  // DM options
+  process_dms: boolean;
+  dm_contacts: boolean;
+  dm_non_contacts: boolean;
+  dm_businesses: boolean;
+  dm_non_businesses: boolean;
+  // Group options
+  process_groups: boolean;
+  group_mode: 'inclusion' | 'exclusion' | null;
+  group_list: string[]; // JIDs for inclusion or exclusion
   created_at: number;
   updated_at: number;
 }
@@ -142,4 +152,17 @@ export async function startHistorySync(): Promise<SyncResult> {
 /** Remove the linked WhatsApp device (logout). */
 export async function unlink(): Promise<void> {
   return NativeWabridge.unlink();
+}
+
+/** Group info returned by getGroups */
+export interface GroupInfo {
+  jid: string;
+  name: string;
+  participant_count: number;
+}
+
+/** Get all WhatsApp groups this account is a member of */
+export async function getGroups(): Promise<GroupInfo[]> {
+  const json = await NativeWabridge.getGroups();
+  return JSON.parse(json);
 }

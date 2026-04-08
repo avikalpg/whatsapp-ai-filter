@@ -4,6 +4,7 @@ package bridge
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -87,7 +89,12 @@ func NewClient(dbPath string, store *Store) (*Client, error) {
 // Call IsLinked() to poll for pairing completion.
 // Call SyncHistory() to wait for HistorySync to finish and run filter triage.
 func (c *Client) StartPairing(phoneNumber string) (string, error) {
+	// Strip all non-digit characters from phone number (WhatsApp expects digits only)
 	phone := strings.TrimPrefix(phoneNumber, "+")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, " ", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
 
 	ctx := context.Background()
 	deviceStore, err := c.waStore.GetFirstDevice(ctx)
@@ -97,6 +104,21 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 
 	logger := waLog.Stdout("wabridge-client", "WARN", true)
 	client := whatsmeow.NewClient(deviceStore, logger)
+	deviceStore.Contacts = c.store
+
+	// Register Contact handler for app state sync
+	client.AddEventHandler(func(evt interface{}) {
+		contactEvt, ok := evt.(*events.Contact)
+		if !ok || contactEvt.Action == nil {
+			return
+		}
+		firstName := contactEvt.Action.GetFirstName()
+		fullName := contactEvt.Action.GetFullName()
+		if fullName == "" {
+			fullName = firstName
+		}
+		_ = c.store.PutContactName(context.Background(), contactEvt.JID, fullName, firstName)
+	})
 
 	// Register HistorySync handler BEFORE connecting so no events are missed.
 	// Messages are saved directly to waci_raw_messages as they arrive.
@@ -209,6 +231,14 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 	pc := c.pairingClient
 	c.pairingMu.Unlock()
 
+	// Fetch contacts from app state before processing history
+	if pc != nil {
+		ctx := context.Background()
+		_ = pc.FetchAppState(ctx, appstate.WAPatchRegularHigh, false, false)
+		// Give contacts a moment to sync
+		time.Sleep(2 * time.Second)
+	}
+
 	if pc != nil {
 		// pairingClient is alive and has the HistorySync handler registered.
 		// Wait for WhatsApp to finish delivering history (progress=100) or timeout.
@@ -320,7 +350,17 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 			continue
 		}
 		for _, msg := range msgs {
-			matched, reason, confidence, triageErr := triage.TriageMessage(msg.Body, f.Prompt)
+			// Check if filter should process this message (DM/group options)
+			shouldProcess, _ := store.shouldProcessMessage(f, msg.ChatJID, msg.SenderJID)
+			if !shouldProcess {
+				continue
+			}
+			// Check metadata-based filter first
+			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.ChatJID, msg.SenderJID)
+			var triageErr error
+			if !handled {
+				matched, reason, confidence, triageErr = triage.TriageMessage(msg.Body, f.Prompt)
+			}
 			if triageErr != nil {
 				continue
 			}
@@ -368,7 +408,17 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 	triage := NewTriageClient(claudeApiKey, "")
 	matched := 0
 	for _, msg := range msgs {
-		ok, reason, confidence, triageErr := triage.TriageMessage(msg.Body, filter.Prompt)
+		// Check if filter should process this message (DM/group options)
+		shouldProcess, _ := store.shouldProcessMessage(filter, msg.ChatJID, msg.SenderJID)
+		if !shouldProcess {
+			continue
+		}
+		// Check metadata-based filter first
+		ok, reason, confidence, handled := matchesMetadataFilter(filter.Prompt, msg.ChatJID, msg.SenderJID)
+		var triageErr error
+		if !handled {
+			ok, reason, confidence, triageErr = triage.TriageMessage(msg.Body, filter.Prompt)
+		}
 		if triageErr != nil {
 			continue
 		}
@@ -468,7 +518,17 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	triage := NewTriageClient(claudeApiKey, "")
 	for _, msg := range collected {
 		for _, f := range filters {
-			matched, reason, confidence, err := triage.TriageMessage(msg.body, f.Prompt)
+			// Check if filter should process this message (DM/group options)
+			shouldProcess, _ := store.shouldProcessMessage(f, msg.chatJID, msg.senderJID)
+			if !shouldProcess {
+				continue
+			}
+			// Check metadata-based filter first
+			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.chatJID, msg.senderJID)
+			var err error
+			if !handled {
+				matched, reason, confidence, err = triage.TriageMessage(msg.body, f.Prompt)
+			}
 			if err != nil {
 				continue
 			}
@@ -533,4 +593,46 @@ func extractBodyFromMsg(msg *waE2E.Message) string {
 // extractBody retained for call-site compatibility.
 func extractBody(evt *events.Message) string {
 	return extractBodyFromMsg(evt.Message)
+}
+
+// GetGroups returns a JSON array of all groups (group chats) this WhatsApp account is a member of.
+// Each entry contains: {"jid": "...", "name": "...", "participant_count": N}
+func (c *Client) GetGroups() (string, error) {
+	ctx := context.Background()
+	deviceStore, err := c.waStore.GetFirstDevice(ctx)
+	if err != nil || deviceStore == nil {
+		return "", fmt.Errorf("not linked to WhatsApp")
+	}
+
+	logger := waLog.Stdout("wabridge-groups", "WARN", true)
+	client := whatsmeow.NewClient(deviceStore, logger)
+
+	if err := client.Connect(); err != nil {
+		return "", fmt.Errorf("failed to connect: %w", err)
+	}
+	defer client.Disconnect()
+
+	// GetJoinedGroups returns all groups we're currently a member of
+	groups, err := client.GetJoinedGroups(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get groups: %w", err)
+	}
+
+	type GroupInfo struct {
+		JID              string `json:"jid"`
+		Name             string `json:"name"`
+		ParticipantCount int    `json:"participant_count"`
+	}
+
+	var result []GroupInfo
+	for _, group := range groups {
+		result = append(result, GroupInfo{
+			JID:              group.JID.String(),
+			Name:             group.Name,
+			ParticipantCount: len(group.Participants),
+		})
+	}
+
+	b, err := json.Marshal(result)
+	return string(b), err
 }

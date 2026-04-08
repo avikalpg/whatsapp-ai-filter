@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Store manages WACI application data in SQLite.
@@ -17,11 +20,21 @@ type Store struct {
 
 // Filter represents a user-defined message filter.
 type Filter struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Prompt    string `json:"prompt"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Prompt          string   `json:"prompt"`
+	// DM options
+	ProcessDMs      bool     `json:"process_dms"`
+	DMContacts      bool     `json:"dm_contacts"`
+	DMNonContacts   bool     `json:"dm_non_contacts"`
+	DMBusinesses    bool     `json:"dm_businesses"`
+	DMNonBusinesses bool     `json:"dm_non_businesses"`
+	// Group options
+	ProcessGroups   bool     `json:"process_groups"`
+	GroupMode       string   `json:"group_mode"` // "inclusion", "exclusion", or empty
+	GroupList       []string `json:"group_list"`
+	CreatedAt       int64    `json:"created_at"`
+	UpdatedAt       int64    `json:"updated_at"`
 }
 
 // FilterMatch represents a message that matched a filter.
@@ -142,28 +155,68 @@ CREATE TABLE IF NOT EXISTS waci_raw_messages (
   received_at INTEGER NOT NULL,
   created_at  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS waci_contacts (
+  jid        TEXT    PRIMARY KEY,
+  first_name TEXT,
+  full_name  TEXT,
+  updated_at INTEGER NOT NULL
+);
 `)
 	if err != nil {
 		return err
 	}
 
-	// Seed the built-in "All Messages" filter exactly once.
-	// Tracked via sync_state so a user who deletes it doesn't see it reappear.
+	// Migrate to schema v3: granular DM/group options
+	var schemaV3 int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v3'`).Scan(&schemaV3)
+	if schemaV3 == 0 {
+		_, _ = s.db.Exec(`
+ALTER TABLE waci_filters ADD COLUMN process_dms INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_contacts INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_non_contacts INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_businesses INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN dm_non_businesses INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN process_groups INTEGER DEFAULT 1;
+ALTER TABLE waci_filters ADD COLUMN group_mode TEXT DEFAULT '';
+ALTER TABLE waci_filters ADD COLUMN group_list TEXT DEFAULT '[]';
+`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v3', '1')`)
+	}
+
+	// Seed the built-in default filters exactly once.
+	// Tracked via sync_state so a user who deletes them doesn't see them reappear.
 	var seeded int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filter_seeded'`).Scan(&seeded)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'default_filters_seeded_v3'`).Scan(&seeded)
 	if seeded == 0 {
 		_, _ = s.db.Exec(`
-INSERT INTO waci_filters (id, name, prompt, created_at, updated_at)
-VALUES ('flt_default_all', 'All Messages', '*', strftime('%s','now'), strftime('%s','now'))
+INSERT OR REPLACE INTO waci_filters (
+  id, name, prompt, 
+  process_dms, dm_contacts, dm_non_contacts, dm_businesses, dm_non_businesses,
+  process_groups, group_mode, group_list,
+  created_at, updated_at
+)
+VALUES 
+  ('flt_default_all', 'All Messages', '*', 1, 1, 1, 1, 1, 1, '', '[]', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms', 'All DMs', '*:dm', 1, 1, 1, 1, 1, 0, '', '[]', strftime('%s','now'), strftime('%s','now')),
+  ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', 1, 1, 0, 0, 0, 0, '', '[]', strftime('%s','now'), strftime('%s','now'))
 `)
-		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filter_seeded', '1')`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v3', '1')`)
 	}
+
 	return nil
 }
 
 // listFilters returns all filters (internal use).
 func (s *Store) listFilters() ([]Filter, error) {
-	rows, err := s.db.Query(`SELECT id, name, prompt, created_at, updated_at FROM waci_filters ORDER BY created_at DESC`)
+	rows, err := s.db.Query(`
+		SELECT id, name, prompt, 
+		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1), 
+		       COALESCE(dm_businesses, 0), COALESCE(dm_non_businesses, 1),
+		       COALESCE(process_groups, 1), COALESCE(group_mode, ''), COALESCE(group_list, '[]'),
+		       created_at, updated_at 
+		FROM waci_filters ORDER BY created_at DESC
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -171,8 +224,25 @@ func (s *Store) listFilters() ([]Filter, error) {
 	var out []Filter
 	for rows.Next() {
 		var f Filter
-		if err := rows.Scan(&f.ID, &f.Name, &f.Prompt, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups int
+		var groupListJSON string
+		if err := rows.Scan(
+			&f.ID, &f.Name, &f.Prompt,
+			&processDMs, &dmContacts, &dmNonContacts, &dmBusinesses, &dmNonBusinesses,
+			&processGroups, &f.GroupMode, &groupListJSON,
+			&f.CreatedAt, &f.UpdatedAt,
+		); err != nil {
 			return nil, err
+		}
+		f.ProcessDMs = processDMs == 1
+		f.DMContacts = dmContacts == 1
+		f.DMNonContacts = dmNonContacts == 1
+		f.DMBusinesses = dmBusinesses == 1
+		f.DMNonBusinesses = dmNonBusinesses == 1
+		f.ProcessGroups = processGroups == 1
+		_ = json.Unmarshal([]byte(groupListJSON), &f.GroupList)
+		if f.GroupList == nil {
+			f.GroupList = []string{}
 		}
 		out = append(out, f)
 	}
@@ -208,14 +278,45 @@ func (s *Store) SaveFilter(filterJson string) (string, error) {
 	}
 	f.UpdatedAt = now
 
+	// Ensure array is not nil
+	if f.GroupList == nil {
+		f.GroupList = []string{}
+	}
+
+	groupListJSON, _ := json.Marshal(f.GroupList)
+
+	// Convert bools to integers for SQLite
+	processDMs := boolToInt(f.ProcessDMs)
+	dmContacts := boolToInt(f.DMContacts)
+	dmNonContacts := boolToInt(f.DMNonContacts)
+	dmBusinesses := boolToInt(f.DMBusinesses)
+	dmNonBusinesses := boolToInt(f.DMNonBusinesses)
+	processGroups := boolToInt(f.ProcessGroups)
+
 	_, err := s.db.Exec(`
-INSERT INTO waci_filters (id, name, prompt, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO waci_filters (
+  id, name, prompt, 
+  process_dms, dm_contacts, dm_non_contacts, dm_businesses, dm_non_businesses,
+  process_groups, group_mode, group_list,
+  created_at, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-  name       = excluded.name,
-  prompt     = excluded.prompt,
-  updated_at = excluded.updated_at
-`, f.ID, f.Name, f.Prompt, f.CreatedAt, f.UpdatedAt)
+  name              = excluded.name,
+  prompt            = excluded.prompt,
+  process_dms       = excluded.process_dms,
+  dm_contacts       = excluded.dm_contacts,
+  dm_non_contacts   = excluded.dm_non_contacts,
+  dm_businesses     = excluded.dm_businesses,
+  dm_non_businesses = excluded.dm_non_businesses,
+  process_groups    = excluded.process_groups,
+  group_mode        = excluded.group_mode,
+  group_list        = excluded.group_list,
+  updated_at        = excluded.updated_at
+`, f.ID, f.Name, f.Prompt,
+		processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses,
+		processGroups, f.GroupMode, string(groupListJSON),
+		f.CreatedAt, f.UpdatedAt)
 	if err != nil {
 		return "", fmt.Errorf("failed to save filter: %w", err)
 	}
@@ -283,6 +384,14 @@ func (s *Store) GetMatches(filterId string, limit int) (string, error) {
 			return "", err
 		}
 		m.IsRead = isRead == 1
+		
+		// Enrich sender name with contact name if available
+		if jid, err := types.ParseJID(m.SenderJID); err == nil {
+			if contactName, _ := s.GetContactName(jid); contactName != "" {
+				m.SenderName = contactName
+			}
+		}
+		
 		out = append(out, m)
 	}
 	if out == nil {
@@ -350,9 +459,35 @@ ORDER BY r.received_at DESC
 // getFilter returns a single filter by ID.
 func (s *Store) getFilter(id string) (Filter, error) {
 	var f Filter
-	err := s.db.QueryRow(`SELECT id, name, prompt, created_at, updated_at FROM waci_filters WHERE id = ?`, id).
-		Scan(&f.ID, &f.Name, &f.Prompt, &f.CreatedAt, &f.UpdatedAt)
-	return f, err
+	var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups int
+	var groupListJSON string
+	err := s.db.QueryRow(`
+		SELECT id, name, prompt,
+		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1),
+		       COALESCE(dm_businesses, 0), COALESCE(dm_non_businesses, 1),
+		       COALESCE(process_groups, 1), COALESCE(group_mode, ''), COALESCE(group_list, '[]'),
+		       created_at, updated_at
+		FROM waci_filters WHERE id = ?
+	`, id).Scan(
+		&f.ID, &f.Name, &f.Prompt,
+		&processDMs, &dmContacts, &dmNonContacts, &dmBusinesses, &dmNonBusinesses,
+		&processGroups, &f.GroupMode, &groupListJSON,
+		&f.CreatedAt, &f.UpdatedAt,
+	)
+	if err != nil {
+		return f, err
+	}
+	f.ProcessDMs = processDMs == 1
+	f.DMContacts = dmContacts == 1
+	f.DMNonContacts = dmNonContacts == 1
+	f.DMBusinesses = dmBusinesses == 1
+	f.DMNonBusinesses = dmNonBusinesses == 1
+	f.ProcessGroups = processGroups == 1
+	_ = json.Unmarshal([]byte(groupListJSON), &f.GroupList)
+	if f.GroupList == nil {
+		f.GroupList = []string{}
+	}
+	return f, nil
 }
 
 // RawMessageCount returns the number of raw messages stored from history sync.
@@ -360,4 +495,140 @@ func (s *Store) RawMessageCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM waci_raw_messages`).Scan(&count)
 	return count, err
+}
+
+// boolToInt converts a bool to int for SQLite storage (1 or 0).
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ── Contact Store Methods ───────────────────────────────────────────────────
+// These methods implement whatsmeow's ContactStore interface for app state sync
+
+// PutContactName signature matches whatsmeow ContactStore: (ctx, user, fullName, firstName)
+func (s *Store) PutContactName(ctx context.Context, jid types.JID, fullName, firstName string) error {
+	_, err := s.db.Exec(`
+INSERT INTO waci_contacts (jid, first_name, full_name, updated_at)
+VALUES (?, ?, ?, strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  first_name = excluded.first_name,
+  full_name = excluded.full_name,
+  updated_at = excluded.updated_at
+`, jid.String(), firstName, fullName)
+	return err
+}
+
+func (s *Store) PutAllContactNames(ctx context.Context, contacts []store.ContactEntry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+INSERT INTO waci_contacts (jid, first_name, full_name, updated_at)
+VALUES (?, ?, ?, strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  first_name = excluded.first_name,
+  full_name = excluded.full_name,
+  updated_at = excluded.updated_at
+`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, contact := range contacts {
+		_, err = stmt.Exec(contact.JID.String(), contact.FirstName, contact.FullName)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) GetContactName(jid types.JID) (string, error) {
+	var fullName string
+	err := s.db.QueryRow(`SELECT full_name FROM waci_contacts WHERE jid = ?`, jid.String()).Scan(&fullName)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return fullName, err
+}
+
+func (s *Store) GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error) {
+	rows, err := s.db.Query(`SELECT jid, first_name, full_name FROM waci_contacts`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	contacts := make(map[types.JID]types.ContactInfo)
+	for rows.Next() {
+		var jidStr, firstName, fullName string
+		if err := rows.Scan(&jidStr, &firstName, &fullName); err != nil {
+			continue
+		}
+		jid, err := types.ParseJID(jidStr)
+		if err != nil {
+			continue
+		}
+		contacts[jid] = types.ContactInfo{
+			Found:     true,
+			FirstName: firstName,
+			FullName:  fullName,
+		}
+	}
+	return contacts, rows.Err()
+}
+
+func (s *Store) GetContact(ctx context.Context, user types.JID) (types.ContactInfo, error) {
+	var firstName, fullName string
+	err := s.db.QueryRow(`SELECT first_name, full_name FROM waci_contacts WHERE jid = ?`, user.String()).Scan(&firstName, &fullName)
+	if err == sql.ErrNoRows {
+		return types.ContactInfo{Found: false}, nil
+	}
+	if err != nil {
+		return types.ContactInfo{}, err
+	}
+	return types.ContactInfo{
+		Found:     true,
+		FirstName: firstName,
+		FullName:  fullName,
+	}, nil
+}
+
+func (s *Store) PutPushName(ctx context.Context, user types.JID, pushName string) (bool, string, error) {
+	var old string
+	_ = s.db.QueryRow(`SELECT full_name FROM waci_contacts WHERE jid = ?`, user.String()).Scan(&old)
+	_, err := s.db.Exec(`
+INSERT INTO waci_contacts (jid, full_name, first_name, updated_at)
+VALUES (?, ?, '', strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  full_name = CASE WHEN full_name = '' OR full_name IS NULL THEN excluded.full_name ELSE full_name END,
+  updated_at = excluded.updated_at
+`, user.String(), pushName)
+	return old != pushName, old, err
+}
+
+func (s *Store) PutBusinessName(ctx context.Context, user types.JID, businessName string) (bool, string, error) {
+	var old string
+	_ = s.db.QueryRow(`SELECT full_name FROM waci_contacts WHERE jid = ?`, user.String()).Scan(&old)
+	_, err := s.db.Exec(`
+INSERT INTO waci_contacts (jid, full_name, first_name, updated_at)
+VALUES (?, ?, '', strftime('%s','now'))
+ON CONFLICT(jid) DO UPDATE SET
+  full_name = CASE WHEN full_name = '' OR full_name IS NULL THEN excluded.full_name ELSE full_name END,
+  updated_at = excluded.updated_at
+`, user.String(), businessName)
+	return old != businessName, old, err
+}
+
+func (s *Store) PutManyRedactedPhones(ctx context.Context, entries []store.RedactedPhoneEntry) error {
+	// We don't need to store redacted phones for our use case
+	return nil
 }

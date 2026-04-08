@@ -69,7 +69,7 @@ export default function RootLayout() {
         options={{ presentation: 'modal', headerShown: true, title: 'New Filter' }}
       />
       <Stack.Screen
-        name="filters/[id]"
+        name="filters/[id]/index"
         options={{ presentation: 'modal', headerShown: true, title: 'Edit Filter' }}
       />
       <Stack.Screen
