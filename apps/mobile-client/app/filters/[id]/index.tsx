@@ -40,7 +40,8 @@ export default function FilterEditScreen() {
   // Group options
   const [processGroups, setProcessGroups] = useState(existingFilter?.process_groups ?? true);
   const [groupMode, setGroupMode] = useState<'inclusion' | 'exclusion'>(
-    existingFilter?.group_mode ?? 'exclusion'
+    // Go returns "" for "no mode set"; fall back to 'exclusion' as the sane default.
+    (existingFilter?.group_mode || 'exclusion') as 'inclusion' | 'exclusion'
   );
   const [groupList, setGroupList] = useState<string[]>(existingFilter?.group_list ?? []);
   

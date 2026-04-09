@@ -117,6 +117,7 @@ export default function GroupPicker({ selectedJIDs, onSelectionChange, mode }: G
         renderItem={renderGroup}
         style={styles.list}
         contentContainerStyle={styles.listContent}
+        nestedScrollEnabled
         ListEmptyComponent={
           <Text style={styles.emptyText}>
             {searchQuery ? 'No groups match your search' : 'No groups found'}

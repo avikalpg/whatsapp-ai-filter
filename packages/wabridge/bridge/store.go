@@ -428,11 +428,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	return err
 }
 
-// GetRawMessagesForFilter returns all raw messages that have NOT yet been
-// matched against filterID. Used when a new filter is created so we can
-// retroactively triage stored history.
-func (s *Store) GetRawMessagesForFilter(filterID string) ([]RawMessage, error) {
-	rows, err := s.db.Query(`
+// GetRawMessagesForFilter returns raw messages that have NOT yet been matched
+// against filterID, ordered newest-first. Pass limit=0 for all messages.
+func (s *Store) GetRawMessagesForFilter(filterID string, limit int) ([]RawMessage, error) {
+	q := `
 SELECT r.message_id, r.sender_jid, r.chat_jid, r.chat_name, r.sender_name, r.body, r.received_at
 FROM waci_raw_messages r
 WHERE NOT EXISTS (
@@ -440,7 +439,11 @@ WHERE NOT EXISTS (
     WHERE m.message_id = r.message_id AND m.filter_id = ?
 )
 ORDER BY r.received_at DESC
-`, filterID)
+`
+	if limit > 0 {
+		q += fmt.Sprintf("LIMIT %d", limit)
+	}
+	rows, err := s.db.Query(q, filterID)
 	if err != nil {
 		return nil, err
 	}
@@ -452,6 +455,40 @@ ORDER BY r.received_at DESC
 			return nil, err
 		}
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// GetGroupsFromDB returns distinct groups seen in the message history.
+// Avoids a live WhatsApp connection; participant count is approximated from
+// the number of distinct senders in that chat.
+func (s *Store) GetGroupsFromDB() ([]map[string]interface{}, error) {
+	rows, err := s.db.Query(`
+SELECT chat_jid, chat_name, COUNT(DISTINCT sender_jid) AS approx_participants
+FROM waci_raw_messages
+WHERE chat_jid LIKE '%@g.us'
+GROUP BY chat_jid
+ORDER BY MAX(received_at) DESC
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []map[string]interface{}
+	for rows.Next() {
+		var jid, name string
+		var count int
+		if err := rows.Scan(&jid, &name, &count); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]interface{}{
+			"jid":               jid,
+			"name":              name,
+			"participant_count": count,
+		})
+	}
+	if out == nil {
+		out = []map[string]interface{}{}
 	}
 	return out, rows.Err()
 }

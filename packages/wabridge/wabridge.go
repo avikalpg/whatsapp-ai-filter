@@ -16,10 +16,11 @@ type MessageCallback interface {
 	OnMessage(jsonPayload string)
 }
 
-// SyncResult is returned by SyncAndTriage.
+// SyncResult is returned by SyncAndTriage and StartHistorySync.
 type SyncResult struct {
-	MessagesSynced int
-	Error          string
+	MessagesSynced    int
+	RawMessagesStored int // number of raw messages saved to DB during history sync
+	Error             string
 }
 
 // Bridge is the main object exposed to native code via gomobile.
@@ -130,8 +131,8 @@ func (b *Bridge) StartHistorySync(callback MessageCallback) (*SyncResult, error)
 	if callback != nil {
 		cb = &messageCallbackAdapter{callback}
 	}
-	synced, err := b.internal.SyncHistory(b.store, b.claudeApiKey, cb)
-	result := &SyncResult{MessagesSynced: synced}
+	synced, rawStored, err := b.internal.SyncHistory(b.store, b.claudeApiKey, cb)
+	result := &SyncResult{MessagesSynced: synced, RawMessagesStored: rawStored}
 	if err != nil {
 		result.Error = err.Error()
 	}
@@ -152,8 +153,8 @@ func (a *messageCallbackAdapter) OnMessage(jsonPayload string) {
 	a.outer.OnMessage(jsonPayload)
 }
 
-// GetGroups returns a JSON array of all WhatsApp groups this account is a member of.
+// GetGroups returns a JSON array of groups seen in message history.
 // Each entry: {"jid": "...", "name": "...", "participant_count": N}
 func (b *Bridge) GetGroups() (string, error) {
-	return b.internal.GetGroups()
+	return b.internal.GetGroups(b.store)
 }

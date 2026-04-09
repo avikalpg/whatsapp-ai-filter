@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -130,11 +131,17 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 			return
 		}
 		syncType := v.Data.GetSyncType()
+		log.Printf("[WACI] HistorySync event: type=%v progress=%d conversations=%d",
+			syncType, v.Data.GetProgress(), len(v.Data.GetConversations()))
+
 		if syncType != waHistorySync.HistorySync_INITIAL_BOOTSTRAP &&
 			syncType != waHistorySync.HistorySync_FULL &&
 			syncType != waHistorySync.HistorySync_RECENT {
+			log.Printf("[WACI] HistorySync: skipping sync type %v", syncType)
 			return
 		}
+		savedCount := 0
+		skippedCount := 0
 		for _, conv := range v.Data.GetConversations() {
 			chatJID := conv.GetID()
 			chatName := conv.GetName()
@@ -144,14 +151,17 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 			for _, histMsg := range conv.GetMessages() {
 				webMsg := histMsg.GetMessage()
 				if webMsg == nil {
+					skippedCount++
 					continue
 				}
 				key := webMsg.GetKey()
 				if key == nil || key.GetFromMe() {
+					skippedCount++
 					continue
 				}
 				body := extractBodyFromMsg(webMsg.GetMessage())
 				if body == "" {
+					skippedCount++
 					continue
 				}
 				senderJID := key.GetParticipant()
@@ -162,7 +172,7 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 				if senderName == "" {
 					senderName = senderJID
 				}
-				_ = c.store.SaveRawMessage(RawMessage{
+				if err := c.store.SaveRawMessage(RawMessage{
 					MessageID:  key.GetID(),
 					SenderJID:  senderJID,
 					ChatJID:    chatJID,
@@ -170,10 +180,19 @@ func (c *Client) StartPairing(phoneNumber string) (string, error) {
 					SenderName: senderName,
 					Body:       body,
 					ReceivedAt: int64(webMsg.GetMessageTimestamp()),
-				})
+				}); err != nil {
+					log.Printf("[WACI] HistorySync: failed to save message %s: %v", key.GetID(), err)
+					skippedCount++
+				} else {
+					savedCount++
+				}
 			}
 		}
+		log.Printf("[WACI] HistorySync: saved=%d skipped=%d progress=%d",
+			savedCount, skippedCount, v.Data.GetProgress())
+
 		if v.Data.GetProgress() >= 100 {
+			log.Printf("[WACI] HistorySync: progress=100, signalling completion")
 			c.historyOnce.Do(func() { close(c.historyCh) })
 		}
 	})
@@ -228,14 +247,18 @@ func (c *Client) IsLinked() bool {
 // it opens a fresh connection to catch any RECENT sync events and triages what's stored.
 //
 // After this call the pairingClient is disconnected and released.
-func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
+// Returns (matchedCount, rawMessagesStored, error).
+func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback MessageCallback) (int, int, error) {
 	c.pairingMu.Lock()
 	pc := c.pairingClient
 	c.pairingMu.Unlock()
 
+	log.Printf("[WACI] SyncHistory: starting (hasPairingClient=%v)", pc != nil)
+
 	// Fetch contacts from app state before processing history
 	if pc != nil {
 		ctx := context.Background()
+		log.Printf("[WACI] SyncHistory: fetching app state contacts")
 		_ = pc.FetchAppState(ctx, appstate.WAPatchRegularHigh, false, false)
 		// Give contacts a moment to sync
 		time.Sleep(2 * time.Second)
@@ -244,11 +267,12 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 	if pc != nil {
 		// pairingClient is alive and has the HistorySync handler registered.
 		// Wait for WhatsApp to finish delivering history (progress=100) or timeout.
+		log.Printf("[WACI] SyncHistory: waiting for historyCh (up to 60s)")
 		select {
 		case <-c.historyCh:
-			// History sync completed normally.
+			log.Printf("[WACI] SyncHistory: historyCh closed normally (progress=100 received)")
 		case <-time.After(60 * time.Second):
-			// Timeout — process whatever arrived so far.
+			log.Printf("[WACI] SyncHistory: timed out waiting for progress=100, processing what arrived")
 			c.historyOnce.Do(func() { close(c.historyCh) })
 		}
 		// Disconnect the pairingClient now that history is collected.
@@ -262,11 +286,15 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 		// No pairingClient (app restarted, or called a second time).
 		// Open a fresh connection; WhatsApp will send RECENT sync on reconnect
 		// which catches any messages since the last session.
+		log.Printf("[WACI] SyncHistory: no pairingClient, opening fresh connection for RECENT sync")
 		ctx := context.Background()
 		deviceStore, err := c.waStore.GetFirstDevice(ctx)
 		if err != nil || deviceStore == nil {
+			log.Printf("[WACI] SyncHistory: no device found, triaging stored messages only")
 			// No device — nothing to sync; just triage whatever is already stored.
-			return c.triageAllFilters(store, claudeApiKey, callback)
+			rawCount, _ := store.RawMessageCount()
+			matched, triageErr := c.triageAllFilters(store, claudeApiKey, callback)
+			return matched, rawCount, triageErr
 		}
 		logger := waLog.Stdout("wabridge-history", "WARN", true)
 		wac := whatsmeow.NewClient(deviceStore, logger)
@@ -283,6 +311,9 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 				syncType != waHistorySync.HistorySync_FULL {
 				return
 			}
+			log.Printf("[WACI] SyncHistory(RECENT): type=%v progress=%d conversations=%d",
+				syncType, v.Data.GetProgress(), len(v.Data.GetConversations()))
+			savedCount := 0
 			for _, conv := range v.Data.GetConversations() {
 				chatJID := conv.GetID()
 				chatName := conv.GetName()
@@ -310,7 +341,7 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 					if senderName == "" {
 						senderName = senderJID
 					}
-					_ = store.SaveRawMessage(RawMessage{
+					if err := store.SaveRawMessage(RawMessage{
 						MessageID:  key.GetID(),
 						SenderJID:  senderJID,
 						ChatJID:    chatJID,
@@ -318,23 +349,35 @@ func (c *Client) SyncHistory(store *Store, claudeApiKey string, callback Message
 						SenderName: senderName,
 						Body:       body,
 						ReceivedAt: int64(webMsg.GetMessageTimestamp()),
-					})
+					}); err == nil {
+						savedCount++
+					}
 				}
 			}
+			log.Printf("[WACI] SyncHistory(RECENT): saved=%d", savedCount)
 			if v.Data.GetProgress() >= 100 {
+				log.Printf("[WACI] SyncHistory(RECENT): progress=100, done")
 				recentOnce.Do(func() { close(recentDone) })
 			}
 		})
 		if err := wac.Connect(); err == nil {
+			log.Printf("[WACI] SyncHistory: connected, waiting for RECENT sync (up to 30s)")
 			select {
 			case <-recentDone:
+				log.Printf("[WACI] SyncHistory: RECENT sync completed")
 			case <-time.After(30 * time.Second):
+				log.Printf("[WACI] SyncHistory: RECENT sync timed out")
 			}
 			wac.Disconnect()
+		} else {
+			log.Printf("[WACI] SyncHistory: failed to connect for RECENT sync: %v", err)
 		}
 	}
 
-	return c.triageAllFilters(store, claudeApiKey, callback)
+	rawCount, _ := store.RawMessageCount()
+	log.Printf("[WACI] SyncHistory: total raw messages in DB: %d", rawCount)
+	matched, err := c.triageAllFilters(store, claudeApiKey, callback)
+	return matched, rawCount, err
 }
 
 // triageAllFilters runs every filter against its unmatched raw messages.
@@ -343,18 +386,29 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 	if err != nil {
 		return 0, fmt.Errorf("failed to load filters: %w", err)
 	}
-	rawCount, _ := store.RawMessageCount()
+	log.Printf("[WACI] triageAllFilters: found %d filters", len(filters))
+	if len(filters) == 0 {
+		log.Printf("[WACI] triageAllFilters: no filters to triage against — matches will be created when user creates filters")
+		return 0, nil
+	}
 	triage := NewTriageClient(claudeApiKey, "")
 	totalMatched := 0
 	for _, f := range filters {
-		msgs, ferr := store.GetRawMessagesForFilter(f.ID)
+		msgs, ferr := store.GetRawMessagesForFilter(f.ID, 0)
 		if ferr != nil {
+			log.Printf("[WACI] triageAllFilters: failed to get messages for filter %s: %v", f.ID, ferr)
 			continue
 		}
+		log.Printf("[WACI] triageAllFilters: filter=%q prompt=%q unmatched_messages=%d", f.Name, f.Prompt, len(msgs))
+		filterMatched := 0
+		filterSkipped := 0
+		filterErrors := 0
 		for _, msg := range msgs {
 			// Check if filter should process this message (DM/group options)
-			shouldProcess, _ := store.shouldProcessMessage(f, msg.ChatJID, msg.SenderJID)
+			shouldProcess, skipReason := store.shouldProcessMessage(f, msg.ChatJID, msg.SenderJID)
 			if !shouldProcess {
+				log.Printf("[WACI] triageAllFilters: skipping msg %s for filter %s: %s", msg.MessageID, f.ID, skipReason)
+				filterSkipped++
 				continue
 			}
 			// Check metadata-based filter first
@@ -364,6 +418,8 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 				matched, reason, confidence, triageErr = triage.TriageMessage(msg.Body, f.Prompt)
 			}
 			if triageErr != nil {
+				log.Printf("[WACI] triageAllFilters: triage error for msg %s: %v", msg.MessageID, triageErr)
+				filterErrors++
 				continue
 			}
 			if matched {
@@ -381,14 +437,19 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 				})
 				if saveErr == nil {
 					totalMatched++
+					filterMatched++
 					if callback != nil {
 						callback.OnMessage(matchJSON)
 					}
+				} else {
+					log.Printf("[WACI] triageAllFilters: failed to save match for msg %s: %v", msg.MessageID, saveErr)
 				}
 			}
 		}
+		log.Printf("[WACI] triageAllFilters: filter=%q matched=%d skipped=%d errors=%d",
+			f.Name, filterMatched, filterSkipped, filterErrors)
 	}
-	_ = rawCount
+	log.Printf("[WACI] triageAllFilters: total matched=%d across %d filters", totalMatched, len(filters))
 	return totalMatched, nil
 }
 
@@ -400,19 +461,26 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 	if err != nil {
 		return 0, fmt.Errorf("filter not found: %w", err)
 	}
-	msgs, err := store.GetRawMessagesForFilter(filterID)
+	// Cap at 500 most-recent messages so new-filter triage is fast.
+	const triageLimit = 500
+	msgs, err := store.GetRawMessagesForFilter(filterID, triageLimit)
 	if err != nil {
 		return 0, fmt.Errorf("failed to load raw messages: %w", err)
 	}
+	log.Printf("[WACI] TriageStoredMessages: filter=%q msgs=%d (limit=%d)", filter.Name, len(msgs), triageLimit)
 	if len(msgs) == 0 {
 		return 0, nil
 	}
 	triage := NewTriageClient(claudeApiKey, "")
 	matched := 0
+	errors := 0
+	skipped := 0
+	firstErr := ""
 	for _, msg := range msgs {
 		// Check if filter should process this message (DM/group options)
 		shouldProcess, _ := store.shouldProcessMessage(filter, msg.ChatJID, msg.SenderJID)
 		if !shouldProcess {
+			skipped++
 			continue
 		}
 		// Check metadata-based filter first
@@ -422,6 +490,11 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 			ok, reason, confidence, triageErr = triage.TriageMessage(msg.Body, filter.Prompt)
 		}
 		if triageErr != nil {
+			errors++
+			if firstErr == "" {
+				firstErr = triageErr.Error()
+				log.Printf("[WACI] TriageStoredMessages: first triage error: %v", triageErr)
+			}
 			continue
 		}
 		if ok {
@@ -444,6 +517,10 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 				}
 			}
 		}
+	}
+	log.Printf("[WACI] TriageStoredMessages: filter=%q matched=%d skipped=%d errors=%d", filter.Name, matched, skipped, errors)
+	if errors > 0 && matched == 0 {
+		return 0, fmt.Errorf("triage failed for all %d messages: %s", errors, firstErr)
 	}
 	return matched, nil
 }
@@ -597,44 +674,13 @@ func extractBody(evt *events.Message) string {
 	return extractBodyFromMsg(evt.Message)
 }
 
-// GetGroups returns a JSON array of all groups (group chats) this WhatsApp account is a member of.
-// Each entry contains: {"jid": "...", "name": "...", "participant_count": N}
-func (c *Client) GetGroups() (string, error) {
-	ctx := context.Background()
-	deviceStore, err := c.waStore.GetFirstDevice(ctx)
-	if err != nil || deviceStore == nil {
-		return "", fmt.Errorf("not linked to WhatsApp")
-	}
-
-	logger := waLog.Stdout("wabridge-groups", "WARN", true)
-	client := whatsmeow.NewClient(deviceStore, logger)
-
-	if err := client.Connect(); err != nil {
-		return "", fmt.Errorf("failed to connect: %w", err)
-	}
-	defer client.Disconnect()
-
-	// GetJoinedGroups returns all groups we're currently a member of
-	groups, err := client.GetJoinedGroups(ctx)
+// GetGroups returns a JSON array of groups seen in message history.
+// Reads from local DB — no live WhatsApp connection required.
+func (c *Client) GetGroups(store *Store) (string, error) {
+	groups, err := store.GetGroupsFromDB()
 	if err != nil {
 		return "", fmt.Errorf("failed to get groups: %w", err)
 	}
-
-	type GroupInfo struct {
-		JID              string `json:"jid"`
-		Name             string `json:"name"`
-		ParticipantCount int    `json:"participant_count"`
-	}
-
-	var result []GroupInfo
-	for _, group := range groups {
-		result = append(result, GroupInfo{
-			JID:              group.JID.String(),
-			Name:             group.Name,
-			ParticipantCount: len(group.Participants),
-		})
-	}
-
-	b, err := json.Marshal(result)
+	b, err := json.Marshal(groups)
 	return string(b), err
 }

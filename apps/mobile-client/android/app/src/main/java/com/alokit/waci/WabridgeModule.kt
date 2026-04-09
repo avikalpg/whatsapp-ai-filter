@@ -136,6 +136,7 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
             val result = b.startHistorySync(callback)
             val map = Arguments.createMap()
             map.putInt("messagesSynced", result.messagesSynced.toInt())
+            map.putInt("rawMessagesStored", result.rawMessagesStored.toInt())
             map.putString("error", result.error ?: "")
             map
         }

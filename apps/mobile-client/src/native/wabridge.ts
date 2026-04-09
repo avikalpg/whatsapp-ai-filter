@@ -47,6 +47,7 @@ export interface FilterMatch {
 
 export interface SyncResult {
   messagesSynced: number;
+  rawMessagesStored: number; // raw messages saved to DB during history sync
   error: string;
 }
 

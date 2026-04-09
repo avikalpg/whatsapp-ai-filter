@@ -17,6 +17,7 @@ import { registerDevice, reissueToken, activateTrial } from '../api/chat';
 const LAST_SYNC_KEY = 'waci_last_sync_ts';
 const DB_PATH_KEY = 'waci_db_path';
 const DEVICE_ID_KEY = 'waci_device_id';
+const HISTORY_SYNC_DONE_KEY = 'waci_history_sync_done';
 const SERVER_URL =
   process.env.EXPO_PUBLIC_API_URL ?? 'https://whatsapp-ai-filter.vercel.app';
 
@@ -108,6 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const trialExpiresAt = await AsyncStorage.getItem('waci_trial_expires_at');
 
       const lastSync = await AsyncStorage.getItem(LAST_SYNC_KEY);
+      const historySyncDone = (await AsyncStorage.getItem(HISTORY_SYNC_DONE_KEY)) === '1';
       const dbPath = await resolveDbPath();
 
       if (!authToken) {
@@ -129,9 +131,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         authToken,
         trialExpiresAt,
         isLinked: linked,
+        historySyncDone,
         lastSyncTimestamp: lastSync ? parseInt(lastSync, 10) : 0,
         isInitialized: true,
       });
+
+      // If already linked but history sync never completed, kick it off now.
+      // This handles the case where the first history sync failed (e.g. crash,
+      // double-connection bug) and the user relaunched the app.
+      if (linked && !historySyncDone) {
+        console.log('[WACI] initialize: linked but history sync not done — starting history sync');
+        get().startHistorySync();
+      }
     } catch (e: unknown) {
       // Keep isInitialized:false so we don't show the Link WhatsApp screen
       // with an uninitialised bridge. The layout will show a retry screen.
@@ -162,6 +173,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Called after the user confirms the pairing code was entered in WhatsApp.
 
   confirmLinked: async () => {
+    // Skip if already linked — polling calls this repeatedly and we only need
+    // to run activation + history sync once.
+    if (get().isLinked) return;
     try {
       const linked = await WaBridge.isLinked();
       if (linked) {
@@ -170,6 +184,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           const { trial_expires_at } = await activateTrial(authToken, SERVER_URL);
           await AsyncStorage.setItem('waci_trial_expires_at', trial_expires_at);
           set({ isLinked: true, trialExpiresAt: trial_expires_at });
+          console.log('[WACI] confirmLinked: linked! kicking off history sync');
           // Kick off history sync immediately after linking so the inbox
           // has real content the moment the user lands there.
           get().startHistorySync();
@@ -220,13 +235,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       // For a newly created filter, retroactively triage raw messages stored
       // from history sync so users immediately see matching historical content.
+      // Fire-and-forget so the filter creation screen is not blocked.
       if (isNew) {
-        try {
-          await WaBridge.triageStoredMessages(saved.id);
-          await get().loadMatches(saved.id);
-        } catch (_) {
-          // Non-fatal — matches can be loaded later via sync.
-        }
+        WaBridge.triageStoredMessages(saved.id)
+          .then(async (triageResult) => {
+            console.log('[WACI] triageStoredMessages result:', JSON.stringify(triageResult));
+            await get().loadMatches(saved.id);
+          })
+          .catch((e) => {
+            console.log('[WACI] triageStoredMessages error:', String(e));
+            // Non-fatal — matches can be loaded later via sync.
+          });
       }
     } catch (e: unknown) {
       set({ error: String(e) });
@@ -278,13 +297,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ historySyncing: true });
     try {
       const result = await WaBridge.startHistorySync();
+      console.log('[WACI] startHistorySync result:', JSON.stringify(result));
+      await AsyncStorage.setItem(HISTORY_SYNC_DONE_KEY, '1');
       set({ historySyncing: false, historySyncDone: true, lastSyncResult: result });
-      // Refresh all filter matches so the inbox shows historical content.
+      // Load filters first (may not be loaded yet if history sync completes
+      // before the inbox mounts and calls loadFilters), then refresh matches.
+      await useAppStore.getState().loadFilters();
       const freshFilters = useAppStore.getState().filters;
+      console.log('[WACI] startHistorySync: refreshing matches for', freshFilters.length, 'filters');
       for (const f of freshFilters) {
         await useAppStore.getState().loadMatches(f.id);
       }
+      // Now that history sync is done (pairingClient disconnected), do a regular
+      // sync to pick up any live messages that arrived during the wait.
+      useAppStore.getState().syncAndTriage();
     } catch (e: unknown) {
+      console.log('[WACI] startHistorySync error:', String(e));
       set({ historySyncing: false, error: String(e) });
     }
   },
@@ -292,13 +320,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── syncAndTriage ──────────────────────────────────────────────────────
 
   syncAndTriage: async () => {
+    // Don't open a second WhatsApp connection while history sync is running —
+    // WhatsApp terminates the pairingClient if two connections exist simultaneously,
+    // which causes HistorySync (INITIAL_BOOTSTRAP) to never be delivered.
+    if (get().historySyncing) {
+      console.log('[WACI] syncAndTriage: skipping — history sync in progress');
+      return;
+    }
     const { lastSyncTimestamp } = get();
     set({ syncing: true });
     try {
       const result = await WaBridge.syncAndTriage(lastSyncTimestamp);
       const now = Math.floor(Date.now() / 1000);
       await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
-      set({ syncing: false, lastSyncResult: result, lastSyncTimestamp: now });
+      // Don't overwrite a meaningful history sync result with a 0-message live sync.
+      const prevResult = get().lastSyncResult;
+      const keepPrev = result.messagesSynced === 0 && prevResult && prevResult.messagesSynced > 0;
+      set({ syncing: false, lastSyncResult: keepPrev ? prevResult : result, lastSyncTimestamp: now });
     } catch (e: unknown) {
       set({ syncing: false, error: String(e) });
     }
@@ -309,7 +347,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   unlink: async () => {
     try {
       await WaBridge.unlink();
-      set({ isLinked: false, pairingCode: null });
+      await AsyncStorage.removeItem(HISTORY_SYNC_DONE_KEY);
+      set({ isLinked: false, pairingCode: null, historySyncDone: false });
     } catch (e: unknown) {
       set({ error: String(e) });
     }
