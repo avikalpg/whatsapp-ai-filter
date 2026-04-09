@@ -15,6 +15,7 @@ import (
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -67,6 +68,7 @@ func NewClient(dbPath string, store *Store) (*Client, error) {
 		_ = rawDB.Close()
 		return nil, fmt.Errorf("failed to upgrade whatsmeow store: %w", err)
 	}
+	waStore.SetOSInfo("WACI", [3]uint32{1, 0, 0})
 	return &Client{
 		dbPath:    dbPath,
 		store:     store,
