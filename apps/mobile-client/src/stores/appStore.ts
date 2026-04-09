@@ -209,6 +209,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── loadFilters ────────────────────────────────────────────────────────
 
   loadFilters: async () => {
+    // Prevent concurrent loads from stacking up (e.g. Filters tab mount +
+    // handleSync both calling loadFilters at the same time).
+    if (get().filtersLoading) return;
     set({ filtersLoading: true });
     try {
       const filters = await WaBridge.getFilters();

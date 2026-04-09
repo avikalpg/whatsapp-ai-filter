@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../src/stores/appStore';
@@ -55,7 +56,11 @@ export default function FiltersScreen() {
         <Text style={styles.addButtonText}>+ New Filter</Text>
       </TouchableOpacity>
 
-      {filters.length === 0 && !filtersLoading ? (
+      {filtersLoading && filters.length === 0 ? (
+        <View style={styles.empty}>
+          <ActivityIndicator size="large" color="#25D366" />
+        </View>
+      ) : filters.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>No filters yet.</Text>
           <Text style={styles.emptyHint}>
@@ -68,8 +73,6 @@ export default function FiltersScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
-          refreshing={filtersLoading}
-          onRefresh={loadFilters}
         />
       )}
     </View>

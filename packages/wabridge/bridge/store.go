@@ -91,12 +91,16 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open waci store: %w", err)
 	}
-	// SQLite does not support concurrent writes; a single connection avoids
-	// "database is locked" errors when sync and UI calls overlap.
-	db.SetMaxOpenConns(1)
+	// WAL mode allows concurrent reads alongside a single writer.
+	// Allow up to 5 connections so reads (getFilters, getMatches) are never
+	// blocked by an ongoing triage write loop.
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(2)
 	// Apply pragmas explicitly — do not rely on URI query params, which
 	// require SQLITE_OPEN_URI support that may not be present in gomobile builds.
-	if _, err = db.Exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;`); err != nil {
+	// busy_timeout tells SQLite to retry for up to 5 s before returning SQLITE_BUSY,
+	// which prevents spurious "database is locked" errors when two writers race.
+	if _, err = db.Exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to apply pragmas: %w", err)
 	}
@@ -202,6 +206,20 @@ VALUES
   ('flt_default_dms_contacts', 'DMs from Contacts', '*:dm:contact', 1, 1, 0, 0, 0, 0, '', '[]', strftime('%s','now'), strftime('%s','now'))
 `)
 		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('default_filters_seeded_v3', '1')`)
+	}
+
+	// Migrate to schema v4: add index to speed up the NOT EXISTS subquery in
+	// GetRawMessagesForFilter. Without this index, every triage call does an
+	// O(raw_messages × matches) full scan, which blocks the DB connection for
+	// seconds and starves getFilters / getMatches callers.
+	var schemaV4 int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v4'`).Scan(&schemaV4)
+	if schemaV4 == 0 {
+		_, _ = s.db.Exec(`
+CREATE INDEX IF NOT EXISTS idx_filter_matches_msg_filter
+  ON waci_filter_matches(message_id, filter_id);
+`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v4', '1')`)
 	}
 
 	return nil
