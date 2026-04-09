@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "WACI",
+    "slug": "waci-mobile-client",
+    "scheme": "waci",
+    "version": "1.6.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#E5FAEF"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E5FAEF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "owner": "avikalp",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7b68a8d1-d02e-49ed-8cd0-0edb2caab114"
+      }
+    }
+  }
+}
