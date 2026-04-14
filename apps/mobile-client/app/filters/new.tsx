@@ -47,6 +47,9 @@ export default function FilterEditScreen() {
     existingFilter?.group_list ?? []
   );
   
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    existingFilter?.notifications_enabled ?? true
+  );
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -77,6 +80,7 @@ export default function FilterEditScreen() {
       process_groups: processGroups,
       group_mode: processGroups ? groupMode : null,
       group_list: processGroups ? groupList : [],
+      notifications_enabled: notificationsEnabled,
     });
     setSaving(false);
     Alert.alert('Saved', id ? 'Filter updated.' : 'Filter created.');
@@ -227,6 +231,22 @@ export default function FilterEditScreen() {
             </View>
           </View>
         )}
+
+        {/* Notifications Section */}
+        <Text style={styles.sectionTitle}>Notifications</Text>
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.switchLabel}>Notify on match</Text>
+            <Text style={styles.hint}>
+              Get a notification when a new message matches this filter
+            </Text>
+          </View>
+          <Switch
+            value={notificationsEnabled}
+            onValueChange={setNotificationsEnabled}
+            trackColor={{ false: '#ccc', true: '#25D366' }}
+          />
+        </View>
 
         <TouchableOpacity
           style={styles.saveButton}

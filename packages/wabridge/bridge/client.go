@@ -47,6 +47,10 @@ type Client struct {
 	// HistorySync events (progress=100) or the 60-second timeout fires.
 	historyCh   chan struct{}
 	historyOnce sync.Once
+
+	// liveClient holds the persistent connection used by StartLiveSync.
+	liveClient *whatsmeow.Client
+	liveMu     sync.Mutex
 }
 
 // NewClient creates a new Client using the given dbPath for the whatsmeow SQLite device store.
@@ -631,6 +635,134 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 		}
 	}
 	return len(collected), nil
+}
+
+// StartLiveSync connects to WhatsApp and maintains a persistent connection,
+// triaging incoming messages against all saved filters in real-time.
+// Idempotent — calling while already connected is a no-op.
+// Call StopLiveSync to disconnect when the app backgrounds.
+func (c *Client) StartLiveSync(store *Store, claudeApiKey string, callback MessageCallback) error {
+	// Block if history sync is still running — only one WhatsApp connection at a time.
+	c.pairingMu.Lock()
+	hasPairingClient := c.pairingClient != nil
+	c.pairingMu.Unlock()
+	if hasPairingClient {
+		return fmt.Errorf("cannot start live sync while history sync is in progress")
+	}
+
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if c.liveClient != nil {
+		log.Printf("[WACI] StartLiveSync: already running, skipping")
+		return nil
+	}
+
+	ctx := context.Background()
+	deviceStore, err := c.waStore.GetFirstDevice(ctx)
+	if err != nil || deviceStore == nil {
+		return fmt.Errorf("no linked device found")
+	}
+
+	logger := waLog.Stdout("wabridge-live", "WARN", true)
+	wac := whatsmeow.NewClient(deviceStore, logger)
+	triage := NewTriageClient(claudeApiKey, "")
+
+	wac.AddEventHandler(func(evt interface{}) {
+		v, ok := evt.(*events.Message)
+		if !ok || v.Info.IsFromMe || v.Message == nil {
+			return
+		}
+		if v.Message.GetProtocolMessage() != nil {
+			return
+		}
+		body := extractBodyFromMsg(v.Message)
+		if body == "" {
+			return
+		}
+
+		// Capture immutable fields before spawning goroutine.
+		msgID := v.Info.ID
+		senderJID := v.Info.Sender.String()
+		chatJID := v.Info.Chat.String()
+		senderName := v.Info.PushName
+		if senderName == "" {
+			senderName = senderJID
+		}
+		ts := v.Info.Timestamp.Unix()
+
+		// Run save + triage in a goroutine so we don't stall the event dispatcher.
+		go func() {
+			raw := RawMessage{
+				MessageID:  msgID,
+				SenderJID:  senderJID,
+				ChatJID:    chatJID,
+				ChatName:   chatJID,
+				SenderName: senderName,
+				Body:       body,
+				ReceivedAt: ts,
+			}
+			if err := store.SaveRawMessage(raw); err != nil {
+				log.Printf("[WACI] LiveSync: failed to save raw message %s: %v", msgID, err)
+			}
+
+			filters, err := store.listFilters()
+			if err != nil {
+				log.Printf("[WACI] LiveSync: failed to load filters: %v", err)
+				return
+			}
+			for _, f := range filters {
+				shouldProcess, _ := store.shouldProcessMessage(f, chatJID, senderJID)
+				if !shouldProcess {
+					continue
+				}
+				matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, chatJID, senderJID)
+				var triageErr error
+				if !handled {
+					matched, reason, confidence, triageErr = triage.TriageMessage(body, f.Prompt)
+				}
+				if triageErr != nil {
+					log.Printf("[WACI] LiveSync: triage error for msg %s filter %s: %v", msgID, f.ID, triageErr)
+					continue
+				}
+				if matched {
+					matchJSON, saveErr := store.SaveMatch(SaveMatchParams{
+						FilterID:        f.ID,
+						MessageID:       msgID,
+						SenderJID:       senderJID,
+						ChatJID:         chatJID,
+						ChatName:        chatJID,
+						SenderName:      senderName,
+						Body:            body,
+						ReceivedAt:      ts,
+						RelevanceReason: reason,
+						Confidence:      confidence,
+					})
+					if saveErr == nil && callback != nil {
+						callback.OnMessage(matchJSON)
+					}
+				}
+			}
+		}()
+	})
+
+	if err := wac.Connect(); err != nil {
+		return fmt.Errorf("failed to connect for live sync: %w", err)
+	}
+
+	c.liveClient = wac
+	log.Printf("[WACI] StartLiveSync: connected, listening for live messages")
+	return nil
+}
+
+// StopLiveSync disconnects the persistent WhatsApp connection.
+func (c *Client) StopLiveSync() {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if c.liveClient != nil {
+		c.liveClient.Disconnect()
+		c.liveClient = nil
+		log.Printf("[WACI] StopLiveSync: disconnected")
+	}
 }
 
 // Unlink removes the stored device (logout).

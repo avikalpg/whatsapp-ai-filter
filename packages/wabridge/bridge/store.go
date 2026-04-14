@@ -31,10 +31,11 @@ type Filter struct {
 	DMNonBusinesses bool     `json:"dm_non_businesses"`
 	// Group options
 	ProcessGroups   bool     `json:"process_groups"`
-	GroupMode       string   `json:"group_mode"` // "inclusion", "exclusion", or empty
-	GroupList       []string `json:"group_list"`
-	CreatedAt       int64    `json:"created_at"`
-	UpdatedAt       int64    `json:"updated_at"`
+	GroupMode            string   `json:"group_mode"` // "inclusion", "exclusion", or empty
+	GroupList            []string `json:"group_list"`
+	NotificationsEnabled bool     `json:"notifications_enabled"`
+	CreatedAt            int64    `json:"created_at"`
+	UpdatedAt            int64    `json:"updated_at"`
 }
 
 // FilterMatch represents a message that matched a filter.
@@ -222,17 +223,28 @@ CREATE INDEX IF NOT EXISTS idx_filter_matches_msg_filter
 		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v4', '1')`)
 	}
 
+	// Migrate to schema v5: per-filter notification toggle.
+	var schemaV5 int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM waci_sync_state WHERE key = 'schema_v5'`).Scan(&schemaV5)
+	if schemaV5 == 0 {
+		_, _ = s.db.Exec(`
+ALTER TABLE waci_filters ADD COLUMN notifications_enabled INTEGER DEFAULT 1;
+`)
+		_, _ = s.db.Exec(`INSERT INTO waci_sync_state (key, value) VALUES ('schema_v5', '1')`)
+	}
+
 	return nil
 }
 
 // listFilters returns all filters (internal use).
 func (s *Store) listFilters() ([]Filter, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, prompt, 
-		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1), 
+		SELECT id, name, prompt,
+		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1),
 		       COALESCE(dm_businesses, 0), COALESCE(dm_non_businesses, 1),
 		       COALESCE(process_groups, 1), COALESCE(group_mode, ''), COALESCE(group_list, '[]'),
-		       created_at, updated_at 
+		       COALESCE(notifications_enabled, 1),
+		       created_at, updated_at
 		FROM waci_filters ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -242,12 +254,13 @@ func (s *Store) listFilters() ([]Filter, error) {
 	var out []Filter
 	for rows.Next() {
 		var f Filter
-		var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups int
+		var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups, notificationsEnabled int
 		var groupListJSON string
 		if err := rows.Scan(
 			&f.ID, &f.Name, &f.Prompt,
 			&processDMs, &dmContacts, &dmNonContacts, &dmBusinesses, &dmNonBusinesses,
 			&processGroups, &f.GroupMode, &groupListJSON,
+			&notificationsEnabled,
 			&f.CreatedAt, &f.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -258,6 +271,7 @@ func (s *Store) listFilters() ([]Filter, error) {
 		f.DMBusinesses = dmBusinesses == 1
 		f.DMNonBusinesses = dmNonBusinesses == 1
 		f.ProcessGroups = processGroups == 1
+		f.NotificationsEnabled = notificationsEnabled == 1
 		_ = json.Unmarshal([]byte(groupListJSON), &f.GroupList)
 		if f.GroupList == nil {
 			f.GroupList = []string{}
@@ -310,30 +324,34 @@ func (s *Store) SaveFilter(filterJson string) (string, error) {
 	dmBusinesses := boolToInt(f.DMBusinesses)
 	dmNonBusinesses := boolToInt(f.DMNonBusinesses)
 	processGroups := boolToInt(f.ProcessGroups)
+	notificationsEnabled := boolToInt(f.NotificationsEnabled)
 
 	_, err := s.db.Exec(`
 INSERT INTO waci_filters (
-  id, name, prompt, 
+  id, name, prompt,
   process_dms, dm_contacts, dm_non_contacts, dm_businesses, dm_non_businesses,
   process_groups, group_mode, group_list,
+  notifications_enabled,
   created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-  name              = excluded.name,
-  prompt            = excluded.prompt,
-  process_dms       = excluded.process_dms,
-  dm_contacts       = excluded.dm_contacts,
-  dm_non_contacts   = excluded.dm_non_contacts,
-  dm_businesses     = excluded.dm_businesses,
-  dm_non_businesses = excluded.dm_non_businesses,
-  process_groups    = excluded.process_groups,
-  group_mode        = excluded.group_mode,
-  group_list        = excluded.group_list,
-  updated_at        = excluded.updated_at
+  name                  = excluded.name,
+  prompt                = excluded.prompt,
+  process_dms           = excluded.process_dms,
+  dm_contacts           = excluded.dm_contacts,
+  dm_non_contacts       = excluded.dm_non_contacts,
+  dm_businesses         = excluded.dm_businesses,
+  dm_non_businesses     = excluded.dm_non_businesses,
+  process_groups        = excluded.process_groups,
+  group_mode            = excluded.group_mode,
+  group_list            = excluded.group_list,
+  notifications_enabled = excluded.notifications_enabled,
+  updated_at            = excluded.updated_at
 `, f.ID, f.Name, f.Prompt,
 		processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses,
 		processGroups, f.GroupMode, string(groupListJSON),
+		notificationsEnabled,
 		f.CreatedAt, f.UpdatedAt)
 	if err != nil {
 		return "", fmt.Errorf("failed to save filter: %w", err)
@@ -514,19 +532,21 @@ ORDER BY MAX(received_at) DESC
 // getFilter returns a single filter by ID.
 func (s *Store) getFilter(id string) (Filter, error) {
 	var f Filter
-	var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups int
+	var processDMs, dmContacts, dmNonContacts, dmBusinesses, dmNonBusinesses, processGroups, notificationsEnabled int
 	var groupListJSON string
 	err := s.db.QueryRow(`
 		SELECT id, name, prompt,
 		       COALESCE(process_dms, 1), COALESCE(dm_contacts, 1), COALESCE(dm_non_contacts, 1),
 		       COALESCE(dm_businesses, 0), COALESCE(dm_non_businesses, 1),
 		       COALESCE(process_groups, 1), COALESCE(group_mode, ''), COALESCE(group_list, '[]'),
+		       COALESCE(notifications_enabled, 1),
 		       created_at, updated_at
 		FROM waci_filters WHERE id = ?
 	`, id).Scan(
 		&f.ID, &f.Name, &f.Prompt,
 		&processDMs, &dmContacts, &dmNonContacts, &dmBusinesses, &dmNonBusinesses,
 		&processGroups, &f.GroupMode, &groupListJSON,
+		&notificationsEnabled,
 		&f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
@@ -538,6 +558,7 @@ func (s *Store) getFilter(id string) (Filter, error) {
 	f.DMBusinesses = dmBusinesses == 1
 	f.DMNonBusinesses = dmNonBusinesses == 1
 	f.ProcessGroups = processGroups == 1
+	f.NotificationsEnabled = notificationsEnabled == 1
 	_ = json.Unmarshal([]byte(groupListJSON), &f.GroupList)
 	if f.GroupList == nil {
 		f.GroupList = []string{}

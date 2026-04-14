@@ -186,6 +186,40 @@ class WabridgeModule: NSObject {
     }
   }
 
+  // MARK: - startLiveSync
+
+  @objc func startLiveSync(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.global(qos: .background).async {
+      do {
+        guard let b = self.bridge else { throw Self.notInitializedError() }
+        let callback = MessageCallbackImpl { _ in /* JS polls getMatches */ }
+        try b.startLiveSync(callback)
+        resolve(nil)
+      } catch {
+        reject("WABRIDGE_ERROR", error.localizedDescription, error)
+      }
+    }
+  }
+
+  // MARK: - stopLiveSync
+
+  @objc func stopLiveSync(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.global(qos: .background).async {
+      guard let b = self.bridge else {
+        resolve(nil)
+        return
+      }
+      b.stopLiveSync()
+      resolve(nil)
+    }
+  }
+
   // MARK: - helpers
 
   static func notInitializedError() -> NSError {

@@ -142,6 +142,34 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // ── startLiveSync ────────────────────────────────────────────────────────
+    // Connect to WhatsApp and keep the connection alive, triaging messages in
+    // real-time. Idempotent. Call stopLiveSync when the app backgrounds.
+
+    @ReactMethod
+    fun startLiveSync(promise: Promise) {
+        runOnBackground(promise) {
+            val b = requireBridge()
+            val callback = object : MessageCallback {
+                override fun onMessage(jsonPayload: String) {
+                    // Match saved to DB; JS polls getMatches via 30s interval.
+                }
+            }
+            b.startLiveSync(callback)
+            null
+        }
+    }
+
+    // ── stopLiveSync ──────────────────────────────────────────────────────────
+
+    @ReactMethod
+    fun stopLiveSync(promise: Promise) {
+        runOnBackground(promise) {
+            requireBridge().stopLiveSync()
+            null
+        }
+    }
+
     // ── getGroups ────────────────────────────────────────────────────────────
 
     @ReactMethod
