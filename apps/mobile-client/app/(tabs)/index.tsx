@@ -18,6 +18,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   AppState,
+  DeviceEventEmitter,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
@@ -144,6 +145,15 @@ export default function InboxScreen() {
       await checkAndNotify();
     }, 30_000);
     return () => clearInterval(interval);
+  }, [loadAll, checkAndNotify]);
+
+  // ── Live-sync push: reload immediately when Go emits a match ──────────
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('WACINewMatch', async () => {
+      await loadAll();
+      await checkAndNotify();
+    });
+    return () => sub.remove();
   }, [loadAll, checkAndNotify]);
 
   const handleFilterPress = (filter: Filter) => {

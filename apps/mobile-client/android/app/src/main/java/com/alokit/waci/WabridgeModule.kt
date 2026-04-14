@@ -1,6 +1,7 @@
 package com.alokit.waci
 
 import com.facebook.react.bridge.*
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import wabridge.Bridge
 import wabridge.MessageCallback
 import wabridge.Wabridge
@@ -152,7 +153,10 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
             val b = requireBridge()
             val callback = object : MessageCallback {
                 override fun onMessage(jsonPayload: String) {
-                    // Match saved to DB; JS polls getMatches via 30s interval.
+                    // Notify JS immediately so matches appear without waiting for the 30s poll.
+                    reactApplicationContext
+                        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                        .emit("WACINewMatch", null)
                 }
             }
             b.startLiveSync(callback)

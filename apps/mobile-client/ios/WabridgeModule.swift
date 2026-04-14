@@ -11,9 +11,17 @@ import Wabridge
  * Gomobile's ObjC API uses NSError** for errors; Swift bridges these as throws.
  */
 @objc(Wabridge)
-class WabridgeModule: NSObject {
+class WabridgeModule: RCTEventEmitter {
 
   private var bridge: WabridgeBridge?
+
+  // MARK: - RCTEventEmitter
+
+  override func supportedEvents() -> [String]! {
+    return ["WACINewMatch"]
+  }
+
+  override static func requiresMainQueueSetup() -> Bool { return false }
 
   // MARK: - initBridge
 
@@ -195,7 +203,10 @@ class WabridgeModule: NSObject {
     DispatchQueue.global(qos: .background).async {
       do {
         guard let b = self.bridge else { throw Self.notInitializedError() }
-        let callback = MessageCallbackImpl { _ in /* JS polls getMatches */ }
+        let callback = MessageCallbackImpl { [weak self] _ in
+          // Notify JS immediately so matches appear without waiting for the 30s poll.
+          self?.sendEvent(withName: "WACINewMatch", body: nil)
+        }
         try b.startLiveSync(callback)
         resolve(nil)
       } catch {

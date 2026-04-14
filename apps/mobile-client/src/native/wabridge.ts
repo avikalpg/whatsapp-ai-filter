@@ -15,12 +15,14 @@ export interface Filter {
   id: string;
   name: string;
   prompt: string;
+  filter_mode: 'intelligent' | 'basic'; // "intelligent" = AI triage (paid), "basic" = keywords/regex (free)
   // DM options
   process_dms: boolean;
   dm_contacts: boolean;
   dm_non_contacts: boolean;
   dm_businesses: boolean;
   dm_non_businesses: boolean;
+  process_status: boolean; // whether to process status@broadcast messages
   // Group options
   process_groups: boolean;
   group_mode: 'inclusion' | 'exclusion' | null;

@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"go.mau.fi/whatsmeow/types"
@@ -11,6 +13,14 @@ import (
 // Returns (shouldProcess bool, skipReason string).
 // This implements granular DM/group filtering logic.
 func (s *Store) shouldProcessMessage(filter Filter, chatJID string, senderJID string) (bool, string) {
+	// Status updates arrive on status@broadcast — handled separately.
+	if chatJID == "status@broadcast" {
+		if filter.ProcessStatus {
+			return true, ""
+		}
+		return false, "status update processing disabled"
+	}
+
 	isGroup := strings.HasSuffix(chatJID, "@g.us")
 
 	if isGroup {
@@ -122,4 +132,55 @@ func matchesMetadataFilter(prompt string, chatJID string, senderJID string) (boo
 
 	// Not a metadata filter — proceed with normal Claude triage
 	return false, "", 0, false
+}
+
+// matchesBasicFilter checks message body against a keyword or regex pattern.
+// Supports:
+//   - "*"           → matches all messages
+//   - "regex:<pat>" → case-sensitive regex
+//   - "kw1, kw2"   → case-insensitive substring match on any keyword
+func matchesBasicFilter(prompt, body string) (bool, string, float64) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "*" {
+		return true, "Matches all messages", 1.0
+	}
+	if strings.HasPrefix(strings.ToLower(prompt), "regex:") {
+		pattern := prompt[6:]
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return false, "invalid regex pattern", 0
+		}
+		if re.MatchString(body) {
+			return true, "Regex match", 1.0
+		}
+		return false, "", 0
+	}
+	// Keyword mode: comma-separated, case-insensitive
+	bodyLower := strings.ToLower(body)
+	for _, kw := range strings.Split(prompt, ",") {
+		kw = strings.ToLower(strings.TrimSpace(kw))
+		if kw != "" && strings.Contains(bodyLower, kw) {
+			return true, fmt.Sprintf("Contains keyword: %q", kw), 1.0
+		}
+	}
+	return false, "", 0
+}
+
+// dispatchTriage decides how to triage a message for a filter:
+//  1. Metadata rules (special prompt syntax like "*:dm")
+//  2. Basic mode: keyword/regex matching — no API call
+//  3. Intelligent mode: Claude AI triage
+func dispatchTriage(filter Filter, chatJID, senderJID, body string, triage *TriageClient) (bool, string, float64, error) {
+	// Step 1: metadata-based shortcuts
+	matched, reason, confidence, handled := matchesMetadataFilter(filter.Prompt, chatJID, senderJID)
+	if handled {
+		return matched, reason, confidence, nil
+	}
+	// Step 2: basic keyword/regex
+	if filter.FilterMode == "basic" {
+		m, r, c := matchesBasicFilter(filter.Prompt, body)
+		return m, r, c, nil
+	}
+	// Step 3: AI triage (intelligent mode, default)
+	return triage.TriageMessage(body, filter.Prompt)
 }
