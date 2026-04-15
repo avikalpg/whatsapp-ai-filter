@@ -15,16 +15,19 @@ export interface Filter {
   id: string;
   name: string;
   prompt: string;
+  filter_mode: 'intelligent' | 'basic'; // "intelligent" = AI triage (paid), "basic" = keywords/regex (free)
   // DM options
   process_dms: boolean;
   dm_contacts: boolean;
   dm_non_contacts: boolean;
   dm_businesses: boolean;
   dm_non_businesses: boolean;
+  process_status: boolean; // whether to process status@broadcast messages
   // Group options
   process_groups: boolean;
   group_mode: 'inclusion' | 'exclusion' | null;
   group_list: string[]; // JIDs for inclusion or exclusion
+  notifications_enabled: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -153,6 +156,19 @@ export async function startHistorySync(): Promise<SyncResult> {
 /** Remove the linked WhatsApp device (logout). */
 export async function unlink(): Promise<void> {
   return NativeWabridge.unlink();
+}
+
+/**
+ * Start a persistent WhatsApp connection that triages incoming messages in
+ * real-time. Idempotent — safe to call while already connected.
+ */
+export async function startLiveSync(): Promise<void> {
+  return NativeWabridge.startLiveSync();
+}
+
+/** Disconnect the persistent connection started by startLiveSync. */
+export async function stopLiveSync(): Promise<void> {
+  return NativeWabridge.stopLiveSync();
 }
 
 /** Group info returned by getGroups */

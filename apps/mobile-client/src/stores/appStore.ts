@@ -49,6 +49,7 @@ interface AppState {
   lastSyncResult: SyncResult | null;
   historySyncing: boolean;
   historySyncDone: boolean;
+  liveSyncing: boolean;
 
   // Error / status
   error: string | null;
@@ -65,6 +66,8 @@ interface AppState {
   loadMatches: (filterId: string, limit?: number) => Promise<void>;
   syncAndTriage: () => Promise<void>;
   startHistorySync: () => Promise<void>;
+  startLiveSync: () => Promise<void>;
+  stopLiveSync: () => Promise<void>;
   unlink: () => Promise<void>;
   refreshToken: () => Promise<void>;
   clearError: () => void;
@@ -88,6 +91,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastSyncResult: null,
   historySyncing: false,
   historySyncDone: false,
+  liveSyncing: false,
   error: null,
 
   // ── initialize ──────────────────────────────────────────────────────────
@@ -311,6 +315,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       for (const f of freshFilters) {
         await useAppStore.getState().loadMatches(f.id);
       }
+      // Advance the notification watermark so history-sync matches don't fire
+      // notifications — the user is already looking at a freshly populated inbox.
+      notificationWatermark = Math.floor(Date.now() / 1000);
       // Now that history sync is done (pairingClient disconnected), do a regular
       // sync to pick up any live messages that arrived during the wait.
       useAppStore.getState().syncAndTriage();
@@ -345,6 +352,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  // ── startLiveSync ──────────────────────────────────────────────────────
+  // Opens a persistent WhatsApp connection that triages messages as they arrive.
+  // No-op while history sync is running (only one WA connection allowed at once).
+
+  startLiveSync: async () => {
+    if (get().liveSyncing || get().historySyncing) {
+      console.log('[WACI] startLiveSync: skipping — liveSyncing or historySyncing');
+      return;
+    }
+    try {
+      await WaBridge.startLiveSync();
+      set({ liveSyncing: true });
+      console.log('[WACI] startLiveSync: connected');
+    } catch (e: unknown) {
+      console.log('[WACI] startLiveSync error:', String(e));
+    }
+  },
+
+  // ── stopLiveSync ───────────────────────────────────────────────────────
+
+  stopLiveSync: async () => {
+    if (!get().liveSyncing) return;
+    try {
+      await WaBridge.stopLiveSync();
+      set({ liveSyncing: false });
+      console.log('[WACI] stopLiveSync: disconnected');
+    } catch (e: unknown) {
+      console.log('[WACI] stopLiveSync error:', String(e));
+    }
+  },
+
   // ── unlink ─────────────────────────────────────────────────────────────
 
   unlink: async () => {
@@ -375,6 +413,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }));
+
+// ── Notification watermark ────────────────────────────────────────────────────
+// Module-level timestamp: only matches created after this point trigger notifications.
+// Initialized to app startup so pre-existing and history-sync matches are silent.
+export let notificationWatermark = Math.floor(Date.now() / 1000);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

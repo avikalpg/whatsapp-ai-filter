@@ -47,6 +47,10 @@ type Client struct {
 	// HistorySync events (progress=100) or the 60-second timeout fires.
 	historyCh   chan struct{}
 	historyOnce sync.Once
+
+	// liveClient holds the persistent connection used by StartLiveSync.
+	liveClient *whatsmeow.Client
+	liveMu     sync.Mutex
 }
 
 // NewClient creates a new Client using the given dbPath for the whatsmeow SQLite device store.
@@ -411,12 +415,7 @@ func (c *Client) triageAllFilters(store *Store, claudeApiKey string, callback Me
 				filterSkipped++
 				continue
 			}
-			// Check metadata-based filter first
-			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.ChatJID, msg.SenderJID)
-			var triageErr error
-			if !handled {
-				matched, reason, confidence, triageErr = triage.TriageMessage(msg.Body, f.Prompt)
-			}
+			matched, reason, confidence, triageErr := dispatchTriage(f, msg.ChatJID, msg.SenderJID, msg.Body, triage)
 			if triageErr != nil {
 				log.Printf("[WACI] triageAllFilters: triage error for msg %s: %v", msg.MessageID, triageErr)
 				filterErrors++
@@ -483,12 +482,7 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 			skipped++
 			continue
 		}
-		// Check metadata-based filter first
-		ok, reason, confidence, handled := matchesMetadataFilter(filter.Prompt, msg.ChatJID, msg.SenderJID)
-		var triageErr error
-		if !handled {
-			ok, reason, confidence, triageErr = triage.TriageMessage(msg.Body, filter.Prompt)
-		}
+		ok, reason, confidence, triageErr := dispatchTriage(filter, msg.ChatJID, msg.SenderJID, msg.Body, triage)
 		if triageErr != nil {
 			errors++
 			if firstErr == "" {
@@ -525,7 +519,8 @@ func (c *Client) TriageStoredMessages(filterID string, store *Store, claudeApiKe
 	return matched, nil
 }
 
-// SyncAndTriage connects to WhatsApp, collects live messages, runs AI triage, then disconnects.
+// SyncAndTriage connects to WhatsApp, collects messages (including RECENT history
+// pushed on reconnect after being offline), runs triage, then disconnects.
 func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiKey string, callback MessageCallback) (int, error) {
 	ctx := context.Background()
 	deviceStore, err := c.waStore.GetFirstDevice(ctx)
@@ -537,43 +532,115 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	wac := whatsmeow.NewClient(deviceStore, logger)
 
 	type rawMsg struct {
-		msgID     string
-		senderJID string
-		chatJID   string
-		body      string
-		timestamp int64
+		msgID      string
+		senderJID  string
+		chatJID    string
+		chatName   string
+		senderName string
+		body       string
+		timestamp  int64
 	}
 	var mu sync.Mutex
 	collected := make([]rawMsg, 0, 64)
 
 	wac.AddEventHandler(func(evt interface{}) {
-		v, ok := evt.(*events.Message)
-		if !ok {
-			return
+		switch v := evt.(type) {
+		case *events.Message:
+			if v.Info.IsFromMe || v.Message == nil {
+				return
+			}
+			if v.Message.GetProtocolMessage() != nil {
+				return
+			}
+			body := extractBodyFromMsg(v.Message)
+			if body == "" {
+				return
+			}
+			ts := v.Info.Timestamp.Unix()
+			if ts <= lastSyncTimestamp {
+				return
+			}
+			senderName := v.Info.PushName
+			if senderName == "" {
+				senderName = v.Info.Sender.String()
+			}
+			mu.Lock()
+			collected = append(collected, rawMsg{
+				msgID:      v.Info.ID,
+				senderJID:  v.Info.Sender.String(),
+				chatJID:    v.Info.Chat.String(),
+				chatName:   v.Info.Chat.String(),
+				senderName: senderName,
+				body:       body,
+				timestamp:  ts,
+			})
+			mu.Unlock()
+
+		case *events.HistorySync:
+			// WhatsApp pushes RECENT/FULL history sync when reconnecting after days offline.
+			// This is the primary path for catching up on messages missed during inactivity.
+			syncType := v.Data.GetSyncType()
+			if syncType != waHistorySync.HistorySync_RECENT &&
+				syncType != waHistorySync.HistorySync_FULL &&
+				syncType != waHistorySync.HistorySync_NON_BLOCKING_DATA {
+				return
+			}
+			log.Printf("[WACI] SyncAndTriage: received %v history with %d conversations", syncType, len(v.Data.GetConversations()))
+			for _, conv := range v.Data.GetConversations() {
+				chatJID := conv.GetID()
+				chatName := conv.GetName()
+				if chatName == "" {
+					chatName = chatJID
+				}
+				for _, histMsg := range conv.GetMessages() {
+					webMsg := histMsg.GetMessage()
+					if webMsg == nil {
+						continue
+					}
+					key := webMsg.GetKey()
+					if key == nil || key.GetFromMe() {
+						continue
+					}
+					body := extractBodyFromMsg(webMsg.GetMessage())
+					if body == "" {
+						continue
+					}
+					ts := int64(webMsg.GetMessageTimestamp())
+					if ts <= lastSyncTimestamp {
+						continue
+					}
+					senderJID := key.GetParticipant()
+					if senderJID == "" {
+						senderJID = chatJID
+					}
+					senderName := webMsg.GetPushName()
+					if senderName == "" {
+						senderName = senderJID
+					}
+					// Persist to raw_messages so newly-created filters can triage these later.
+					_ = store.SaveRawMessage(RawMessage{
+						MessageID:  key.GetID(),
+						SenderJID:  senderJID,
+						ChatJID:    chatJID,
+						ChatName:   chatName,
+						SenderName: senderName,
+						Body:       body,
+						ReceivedAt: ts,
+					})
+					mu.Lock()
+					collected = append(collected, rawMsg{
+						msgID:      key.GetID(),
+						senderJID:  senderJID,
+						chatJID:    chatJID,
+						chatName:   chatName,
+						senderName: senderName,
+						body:       body,
+						timestamp:  ts,
+					})
+					mu.Unlock()
+				}
+			}
 		}
-		if v.Info.IsFromMe || v.Message == nil {
-			return
-		}
-		if v.Message.GetProtocolMessage() != nil {
-			return
-		}
-		body := extractBodyFromMsg(v.Message)
-		if body == "" {
-			return
-		}
-		ts := v.Info.Timestamp.Unix()
-		if ts <= lastSyncTimestamp {
-			return
-		}
-		mu.Lock()
-		collected = append(collected, rawMsg{
-			msgID:     v.Info.ID,
-			senderJID: v.Info.Sender.String(),
-			chatJID:   v.Info.Chat.String(),
-			body:      body,
-			timestamp: ts,
-		})
-		mu.Unlock()
 	})
 
 	if err := wac.Connect(); err != nil {
@@ -597,18 +664,12 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 	triage := NewTriageClient(claudeApiKey, "")
 	for _, msg := range collected {
 		for _, f := range filters {
-			// Check if filter should process this message (DM/group options)
 			shouldProcess, _ := store.shouldProcessMessage(f, msg.chatJID, msg.senderJID)
 			if !shouldProcess {
 				continue
 			}
-			// Check metadata-based filter first
-			matched, reason, confidence, handled := matchesMetadataFilter(f.Prompt, msg.chatJID, msg.senderJID)
-			var err error
-			if !handled {
-				matched, reason, confidence, err = triage.TriageMessage(msg.body, f.Prompt)
-			}
-			if err != nil {
+			matched, reason, confidence, triageErr := dispatchTriage(f, msg.chatJID, msg.senderJID, msg.body, triage)
+			if triageErr != nil {
 				continue
 			}
 			if matched {
@@ -617,8 +678,8 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 					MessageID:       msg.msgID,
 					SenderJID:       msg.senderJID,
 					ChatJID:         msg.chatJID,
-					ChatName:        msg.chatJID,
-					SenderName:      msg.senderJID,
+					ChatName:        msg.chatName,
+					SenderName:      msg.senderName,
 					Body:            msg.body,
 					ReceivedAt:      msg.timestamp,
 					RelevanceReason: reason,
@@ -631,6 +692,130 @@ func (c *Client) SyncAndTriage(lastSyncTimestamp int64, store *Store, claudeApiK
 		}
 	}
 	return len(collected), nil
+}
+
+// StartLiveSync connects to WhatsApp and maintains a persistent connection,
+// triaging incoming messages against all saved filters in real-time.
+// Idempotent — calling while already connected is a no-op.
+// Call StopLiveSync to disconnect when the app backgrounds.
+func (c *Client) StartLiveSync(store *Store, claudeApiKey string, callback MessageCallback) error {
+	// Block if history sync is still running — only one WhatsApp connection at a time.
+	c.pairingMu.Lock()
+	hasPairingClient := c.pairingClient != nil
+	c.pairingMu.Unlock()
+	if hasPairingClient {
+		return fmt.Errorf("cannot start live sync while history sync is in progress")
+	}
+
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if c.liveClient != nil {
+		log.Printf("[WACI] StartLiveSync: already running, skipping")
+		return nil
+	}
+
+	ctx := context.Background()
+	deviceStore, err := c.waStore.GetFirstDevice(ctx)
+	if err != nil || deviceStore == nil {
+		return fmt.Errorf("no linked device found")
+	}
+
+	logger := waLog.Stdout("wabridge-live", "WARN", true)
+	wac := whatsmeow.NewClient(deviceStore, logger)
+	triage := NewTriageClient(claudeApiKey, "")
+
+	wac.AddEventHandler(func(evt interface{}) {
+		v, ok := evt.(*events.Message)
+		if !ok || v.Info.IsFromMe || v.Message == nil {
+			return
+		}
+		if v.Message.GetProtocolMessage() != nil {
+			return
+		}
+		body := extractBodyFromMsg(v.Message)
+		if body == "" {
+			return
+		}
+
+		// Capture immutable fields before spawning goroutine.
+		msgID := v.Info.ID
+		senderJID := v.Info.Sender.String()
+		chatJID := v.Info.Chat.String()
+		senderName := v.Info.PushName
+		if senderName == "" {
+			senderName = senderJID
+		}
+		ts := v.Info.Timestamp.Unix()
+
+		// Run save + triage in a goroutine so we don't stall the event dispatcher.
+		go func() {
+			raw := RawMessage{
+				MessageID:  msgID,
+				SenderJID:  senderJID,
+				ChatJID:    chatJID,
+				ChatName:   chatJID,
+				SenderName: senderName,
+				Body:       body,
+				ReceivedAt: ts,
+			}
+			if err := store.SaveRawMessage(raw); err != nil {
+				log.Printf("[WACI] LiveSync: failed to save raw message %s: %v", msgID, err)
+			}
+
+			filters, err := store.listFilters()
+			if err != nil {
+				log.Printf("[WACI] LiveSync: failed to load filters: %v", err)
+				return
+			}
+			for _, f := range filters {
+				shouldProcess, _ := store.shouldProcessMessage(f, chatJID, senderJID)
+				if !shouldProcess {
+					continue
+				}
+				matched, reason, confidence, triageErr := dispatchTriage(f, chatJID, senderJID, body, triage)
+				if triageErr != nil {
+					log.Printf("[WACI] LiveSync: triage error for msg %s filter %s: %v", msgID, f.ID, triageErr)
+					continue
+				}
+				if matched {
+					matchJSON, saveErr := store.SaveMatch(SaveMatchParams{
+						FilterID:        f.ID,
+						MessageID:       msgID,
+						SenderJID:       senderJID,
+						ChatJID:         chatJID,
+						ChatName:        chatJID,
+						SenderName:      senderName,
+						Body:            body,
+						ReceivedAt:      ts,
+						RelevanceReason: reason,
+						Confidence:      confidence,
+					})
+					if saveErr == nil && callback != nil {
+						callback.OnMessage(matchJSON)
+					}
+				}
+			}
+		}()
+	})
+
+	if err := wac.Connect(); err != nil {
+		return fmt.Errorf("failed to connect for live sync: %w", err)
+	}
+
+	c.liveClient = wac
+	log.Printf("[WACI] StartLiveSync: connected, listening for live messages")
+	return nil
+}
+
+// StopLiveSync disconnects the persistent WhatsApp connection.
+func (c *Client) StopLiveSync() {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if c.liveClient != nil {
+		c.liveClient.Disconnect()
+		c.liveClient = nil
+		log.Printf("[WACI] StopLiveSync: disconnected")
+	}
 }
 
 // Unlink removes the stored device (logout).

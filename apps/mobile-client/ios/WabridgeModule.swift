@@ -11,9 +11,17 @@ import Wabridge
  * Gomobile's ObjC API uses NSError** for errors; Swift bridges these as throws.
  */
 @objc(Wabridge)
-class WabridgeModule: NSObject {
+class WabridgeModule: RCTEventEmitter {
 
   private var bridge: WabridgeBridge?
+
+  // MARK: - RCTEventEmitter
+
+  override func supportedEvents() -> [String]! {
+    return ["WACINewMatch"]
+  }
+
+  override static func requiresMainQueueSetup() -> Bool { return false }
 
   // MARK: - initBridge
 
@@ -183,6 +191,43 @@ class WabridgeModule: NSObject {
       } catch {
         reject("WABRIDGE_ERROR", error.localizedDescription, error)
       }
+    }
+  }
+
+  // MARK: - startLiveSync
+
+  @objc func startLiveSync(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.global(qos: .background).async {
+      do {
+        guard let b = self.bridge else { throw Self.notInitializedError() }
+        let callback = MessageCallbackImpl { [weak self] _ in
+          // Notify JS immediately so matches appear without waiting for the 30s poll.
+          self?.sendEvent(withName: "WACINewMatch", body: nil)
+        }
+        try b.startLiveSync(callback)
+        resolve(nil)
+      } catch {
+        reject("WABRIDGE_ERROR", error.localizedDescription, error)
+      }
+    }
+  }
+
+  // MARK: - stopLiveSync
+
+  @objc func stopLiveSync(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.global(qos: .background).async {
+      guard let b = self.bridge else {
+        resolve(nil)
+        return
+      }
+      b.stopLiveSync()
+      resolve(nil)
     }
   }
 

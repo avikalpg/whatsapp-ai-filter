@@ -153,6 +153,22 @@ func (a *messageCallbackAdapter) OnMessage(jsonPayload string) {
 	a.outer.OnMessage(jsonPayload)
 }
 
+// StartLiveSync connects to WhatsApp and stays connected, triaging incoming
+// messages in real-time as they arrive. Idempotent — safe to call multiple times.
+// Call StopLiveSync when the app backgrounds to release the connection.
+func (b *Bridge) StartLiveSync(callback MessageCallback) error {
+	var cb bridge.MessageCallback
+	if callback != nil {
+		cb = &messageCallbackAdapter{callback}
+	}
+	return b.internal.StartLiveSync(b.store, b.claudeApiKey, cb)
+}
+
+// StopLiveSync disconnects the persistent WhatsApp connection started by StartLiveSync.
+func (b *Bridge) StopLiveSync() {
+	b.internal.StopLiveSync()
+}
+
 // GetGroups returns a JSON array of groups seen in message history.
 // Each entry: {"jid": "...", "name": "...", "participant_count": N}
 func (b *Bridge) GetGroups() (string, error) {

@@ -1,6 +1,7 @@
 package com.alokit.waci
 
 import com.facebook.react.bridge.*
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import wabridge.Bridge
 import wabridge.MessageCallback
 import wabridge.Wabridge
@@ -139,6 +140,37 @@ class WabridgeModule(reactContext: ReactApplicationContext) :
             map.putInt("rawMessagesStored", result.rawMessagesStored.toInt())
             map.putString("error", result.error ?: "")
             map
+        }
+    }
+
+    // ── startLiveSync ────────────────────────────────────────────────────────
+    // Connect to WhatsApp and keep the connection alive, triaging messages in
+    // real-time. Idempotent. Call stopLiveSync when the app backgrounds.
+
+    @ReactMethod
+    fun startLiveSync(promise: Promise) {
+        runOnBackground(promise) {
+            val b = requireBridge()
+            val callback = object : MessageCallback {
+                override fun onMessage(jsonPayload: String) {
+                    // Notify JS immediately so matches appear without waiting for the 30s poll.
+                    reactApplicationContext
+                        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                        .emit("WACINewMatch", null)
+                }
+            }
+            b.startLiveSync(callback)
+            null
+        }
+    }
+
+    // ── stopLiveSync ──────────────────────────────────────────────────────────
+
+    @ReactMethod
+    fun stopLiveSync(promise: Promise) {
+        runOnBackground(promise) {
+            requireBridge().stopLiveSync()
+            null
         }
     }
 

@@ -1,6 +1,12 @@
 /**
  * Inbox screen — shows all filters with their match counts.
  * User taps a filter to see its matched messages.
+ *
+ * Live sync lifecycle:
+ *  - Mount / foreground   → initial sync, then startLiveSync
+ *  - Background           → stopLiveSync
+ *  - History sync done    → startLiveSync (for first-time users)
+ *  - Every 30 s           → reload matches + fire notifications for new ones
  */
 import React, { useEffect, useCallback, useRef } from 'react';
 import {
@@ -12,10 +18,23 @@ import {
   StyleSheet,
   ActivityIndicator,
   AppState,
+  DeviceEventEmitter,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
-import { useAppStore } from '../../src/stores/appStore';
+import { useAppStore, notificationWatermark } from '../../src/stores/appStore';
 import type { Filter } from '../../src/native/wabridge';
+
+// Configure how notifications appear when the app is in the foreground.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowList: true,
+  }),
+});
 
 export default function InboxScreen() {
   const router = useRouter();
@@ -28,10 +47,14 @@ export default function InboxScreen() {
     syncAndTriage,
     loadFilters,
     loadMatches,
+    startLiveSync,
+    stopLiveSync,
   } = useAppStore();
 
   const appState = useRef(AppState.currentState);
   const hasAutoSyncedRef = useRef(false);
+  // Tracks the last timestamp we notified up to, to avoid duplicate notifications.
+  const lastNotifiedAtRef = useRef<number>(notificationWatermark);
 
   const loadAll = useCallback(async () => {
     await loadFilters();
@@ -42,35 +65,100 @@ export default function InboxScreen() {
   }, [loadFilters, loadMatches]);
 
   const handleSync = useCallback(async () => {
+    // Stop live sync before opening the syncAndTriage connection — WhatsApp
+    // drops the older connection when a second one opens on the same device.
+    await stopLiveSync();
     await syncAndTriage();
     await loadAll();
-  }, [syncAndTriage, loadAll]);
+    // Restart live sync now that the temporary sync connection has closed.
+    await startLiveSync();
+  }, [stopLiveSync, syncAndTriage, loadAll, startLiveSync]);
 
-  // Auto-sync on mount (first open)
+  // Fire local notifications for any matches newer than the watermark that
+  // belong to a filter with notifications_enabled.
+  const checkAndNotify = useCallback(async () => {
+    if (useAppStore.getState().historySyncing) return;
+    const { matches: currentMatches, filters: currentFilters } = useAppStore.getState();
+    const now = Math.floor(Date.now() / 1000);
+    for (const filter of currentFilters) {
+      if (!filter.notifications_enabled) continue;
+      const filterMatches = currentMatches[filter.id] ?? [];
+      const newMatches = filterMatches.filter(
+        (m) => m.created_at > lastNotifiedAtRef.current
+      );
+      for (const match of newMatches) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: filter.name,
+              body: `${match.sender_name}: ${match.body.slice(0, 120)}`,
+              data: { filterId: filter.id, matchId: match.id },
+            },
+            trigger: null, // deliver immediately
+          });
+        } catch (e) {
+          console.log('[WACI] notification schedule error:', e);
+        }
+      }
+    }
+    lastNotifiedAtRef.current = now;
+  }, []);
+
+  // ── Mount: initial sync (handleSync already starts live sync internally) ─
   useEffect(() => {
     if (!hasAutoSyncedRef.current) {
       hasAutoSyncedRef.current = true;
       handleSync();
     }
-  }, [handleSync]);
+    return () => {
+      stopLiveSync();
+    };
+  }, [handleSync, stopLiveSync]);
 
-  // Auto-sync when app comes to foreground
+  // ── Start live sync once history sync finishes (first-time users) ──────
+  useEffect(() => {
+    if (!historySyncing && hasAutoSyncedRef.current) {
+      // Advance watermark so historical matches don't all notify.
+      lastNotifiedAtRef.current = Math.floor(Date.now() / 1000);
+      startLiveSync();
+    }
+  }, [historySyncing, startLiveSync]);
+
+  // ── Foreground/background: manage live sync ────────────────────────────
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        // App has come to the foreground
+        // handleSync stops live sync → syncs → restarts live sync internally.
         handleSync();
+      } else if (nextAppState.match(/inactive|background/)) {
+        stopLiveSync();
       }
       appState.current = nextAppState;
     });
+    return () => subscription.remove();
+  }, [handleSync, stopLiveSync]);
 
-    return () => {
-      subscription.remove();
-    };
-  }, [handleSync]);
+  // ── 30s poll: reload matches + notify ─────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      await loadAll();
+      await checkAndNotify();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [loadAll, checkAndNotify]);
+
+  // ── Live-sync push: reload immediately when Go emits a match ──────────
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('WACINewMatch', async () => {
+      await loadAll();
+      await checkAndNotify();
+    });
+    return () => sub.remove();
+  }, [loadAll, checkAndNotify]);
 
   const handleFilterPress = (filter: Filter) => {
-    router.push(`/filters/${filter.id}/messages`);  };
+    router.push(`/filters/${filter.id}/messages`);
+  };
 
   const getMatchCount = (filterId: string): number => {
     return matches[filterId]?.length ?? 0;
@@ -167,11 +255,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  filterHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  filterHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6 
+    marginBottom: 6,
   },
   filterName: { fontWeight: '600', fontSize: 16, flex: 1 },
   badge: {

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useAppStore } from '../src/stores/appStore';
 
@@ -11,6 +12,18 @@ export default function RootLayout() {
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  // Request notification permissions once on app start.
+  useEffect(() => {
+    Notifications.requestPermissionsAsync().catch(() => {});
+    if (Platform.OS === 'android') {
+      Notifications.setNotificationChannelAsync('waci-matches', {
+        name: 'Filter Matches',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+      }).catch(() => {});
+    }
+  }, []);
 
   // Once initialized, enforce navigation protection via redirect (not conditional Stack.Screen
   // rendering — passing React.Fragment as a Stack child causes expo-router's mapProtectedScreen
